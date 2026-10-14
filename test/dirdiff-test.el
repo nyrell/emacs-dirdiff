@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 
-;; Run with:
-;;   emacs --batch -Q -L . -l test/dirdiff-test.el -f ert-run-tests-batch-and-exit
+;; Run the tests with:
+;; `emacs --batch -Q -L . -l test/dirdiff-test.el -f ert-run-tests-batch-and-exit'
 
 ;;; Code:
 
@@ -26,7 +26,8 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
              (write-region content nil file nil 'silent)))))))
 
 (defmacro dirdiff-test--with-dirs (left-spec right-spec &rest body)
-  "Run BODY with `left' and `right' bound to new directories."
+  "Run BODY with `left' and `right' bound to new directories.
+They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
   (declare (indent 2))
   `(let* ((root (make-temp-file "dirdiff-test-" t))
           (left (expand-file-name "left/" root))
@@ -41,6 +42,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
        (delete-directory root t))))
 
 (defun dirdiff-test--session (left right &rest options)
+  "Return a compared session of directories LEFT and RIGHT with OPTIONS."
   (let ((session (apply #'dirdiff-session-create
                         :left (dirdiff-dir-source-create :root left :label "L" :writable t)
                         :right (dirdiff-dir-source-create :root right :label "R" :writable t)
@@ -49,12 +51,14 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
     session))
 
 (defun dirdiff-test--find (session rel)
+  "Return the node of SESSION at relative name REL, or nil."
   (catch 'found
     (dirdiff--walk (dirdiff-session-tree session)
                    (lambda (n) (when (equal (dirdiff-node-rel n) rel) (throw 'found n))))
     nil))
 
 (defun dirdiff-test--status (session rel)
+  "Return the status of the node of SESSION at REL."
   (dirdiff-node-status (or (dirdiff-test--find session rel) (error "No node %s" rel))))
 
 (defun dirdiff-test--statuses (session)
@@ -65,7 +69,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
     (nreverse result)))
 
 (defmacro dirdiff-test--in-buffer (session &rest body)
-  "Run BODY in a dirdiff buffer showing SESSION, answering yes to prompts."
+  "Run BODY in a dirdiff buffer showing SESSION; say yes to every question."
   (declare (indent 1))
   `(let ((buffer (dirdiff-show-session ,session)))
      (unwind-protect
@@ -76,11 +80,12 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
        (kill-buffer buffer))))
 
 (defun dirdiff-test--lines ()
-  "The buffer text as a list of lines with runs of spaces collapsed."
+  "Return the lines of the buffer, with consecutive spaces collapsed."
   (mapcar (lambda (l) (string-trim (replace-regexp-in-string " +" " " l)))
           (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n" t)))
 
 (defun dirdiff-test--read (file)
+  "Return the contents of FILE."
   (with-temp-buffer (insert-file-contents-literally file) (buffer-string)))
 
 ;;;; Comparison engine
@@ -266,6 +271,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
 ;;;; Editing
 
 (defun dirdiff-test--goto (rel)
+  "Move to the row of the node at REL, expanding directories as needed."
   (dirdiff--goto-node (dirdiff-test--find dirdiff--session rel)))
 
 (ert-deftest dirdiff-test-copy-file ()
@@ -355,7 +361,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
       (should (equal (dirdiff-test--read (expand-file-name "f" right)) "new")))))
 
 (defun dirdiff-test--messages (thunk)
-  "Call THUNK and return the messages it shows; fail if it runs ediff."
+  "Call THUNK and return its messages; fail if ediff is started."
   (let (messages)
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
@@ -423,6 +429,8 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
        (delete-directory repo t))))
 
 (defun dirdiff-test--git-session (repo left-rev right-rev &optional ignore-whitespace)
+  "Return a compared session of REPO's LEFT-REV and RIGHT-REV.
+With IGNORE-WHITESPACE, ignore whitespace."
   (let ((session (dirdiff-git--session repo left-rev right-rev)))
     (setf (dirdiff-session-ignore-whitespace session) ignore-whitespace)
     (dirdiff--build-tree session)
@@ -455,7 +463,7 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
 (ert-deftest dirdiff-test-git-files-and-copy ()
   (dirdiff-test--with-repo
     (let* ((s (dirdiff-test--git-session repo "HEAD~1" nil))
-           (file (dirdiff--local-file-in s "a.txt" 'left)))
+           (file (dirdiff-test--local-file s "a.txt" 'left)))
       ;; Revision files are extracted read-only.
       (should (equal (dirdiff-test--read file) "a\nb\n"))
       (should-not (file-writable-p file))
@@ -477,7 +485,8 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
       ;; Killing the buffer removed the extracted files.
       (should-not (file-exists-p file)))))
 
-(defun dirdiff--local-file-in (session rel side)
+(defun dirdiff-test--local-file (session rel side)
+  "Return the local file of the node of SESSION at REL on SIDE."
   (let ((dirdiff--session session))
     (dirdiff--local-file (dirdiff-test--find session rel) side)))
 
