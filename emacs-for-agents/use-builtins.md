@@ -8,12 +8,12 @@ is in no model's short-term memory. Search before you write.
 
 | Question | Command |
 |---|---|
-| Which functions exist for strings, lists, files…? | `elisp-agent builtins GROUP` (in Emacs: `M-x shortdoc`) |
-| Does this function exist? How is it called? | `elisp-agent describe NAME` |
-| What does it really return? | `elisp-agent eval '(NAME ...)'` |
-| Anything with "trim" in its name? | `elisp-agent eval '(apropos-internal "trim" (quote fboundp))'` |
-| Which library defines a feature? | `elisp-agent eval '(locate-library "seq")'` |
-| How is this done properly (hooks, modes, processes…)? | `elisp-agent info --index elisp TOPIC`, then `elisp-agent info elisp NODE` |
+| Which functions exist for strings, lists, files…? | `emacs-for-agents/tools/elisp-agent builtins GROUP` (in Emacs: `M-x shortdoc`) |
+| Does this function exist? How is it called? | `emacs-for-agents/tools/elisp-agent describe NAME` |
+| What does it really return? | `emacs-for-agents/tools/elisp-agent eval '(NAME ...)'` |
+| Anything with "trim" in its name? | `emacs-for-agents/tools/elisp-agent eval '(apropos-internal "trim" (quote fboundp))'` |
+| Which library defines a feature? | `emacs-for-agents/tools/elisp-agent eval '(locate-library "seq")'` |
+| How is this done properly (hooks, modes, processes…)? | `emacs-for-agents/tools/elisp-agent info --index elisp TOPIC`, then `emacs-for-agents/tools/elisp-agent info elisp NODE` |
 
 **Not built in:** `s.el`, `dash.el`, `f.el` and `ht.el` are popular
 packages, not part of Emacs. Code that calls `s-trim`, `-map` or `f-join`
@@ -54,7 +54,7 @@ exists.
 | Read a file or directory name | `read-file-name`, `read-directory-name` |
 | Run a program and get its output | `process-lines`, `call-process`, `process-file` |
 | Quote a shell argument | `shell-quote-argument` |
-| JSON | `json-parse-string`, `json-serialize` |
+| JSON | `json-parse-string`, `json-serialize` (built in from Emacs 30; in 27–29 only if `(json-available-p)`, otherwise `json-read-from-string` from `json.el`) |
 | Dates and times | `format-time-string`, `time-equal-p`, `time-less-p`, `date-to-time` |
 | Thing at point | `thing-at-point`, `bounds-of-thing-at-point` |
 | Text properties in a region | `text-property-search-forward`, `text-property-any`, `next-single-property-change` |
@@ -67,14 +67,17 @@ exists.
 | Menus of commands | `transient-define-prefix` (built in since Emacs 28), `easy-menu-define` |
 | Diff two files | `ediff-files`, `diff-no-select` |
 
-## Examples from this repository
+## Examples
 
-- `dirdiff--join` was a two-line function equal to `file-name-concat`; removed.
-- The column layout uses `truncate-string-to-width`, which pads and cuts by
-  *display* width, so wide characters stay aligned; `substring` and `length`
-  count characters and would not.
-- The comparison opens its frame with `pop-to-buffer` and a
-  `display-buffer-pop-up-frame` action instead of `make-frame`, so `q`
-  (`quit-window`) deletes the frame without any bookkeeping.
-- Running git uses `process-file` with an argument list, so file names with
-  spaces or quotes need no quoting, and remote directories work.
+From a real package, written by an agent and then corrected:
+
+- A two-line helper that joined directory and file names duplicated
+  `file-name-concat`; it was removed.
+- A column layout used `substring` and `length`, which count characters, so
+  wide characters broke the alignment. `truncate-string-to-width` cuts by
+  *display* width, and pads too when given its PADDING argument.
+- A command opened its frame with `make-frame` and had to delete it by hand.
+  `pop-to-buffer` with a `display-buffer-pop-up-frame` action lets `q`
+  (`quit-window`) delete the frame without any bookkeeping.
+- Running git with `process-file` and an argument list needs no quoting
+  of file names with spaces or quotes, and works in remote directories.

@@ -32,7 +32,7 @@ and the values it compared (`:form (equal 3 4) :value nil`).
 - Compare whole values with `equal`, not piece by piece. One expected value
   says more than ten `should`s.
 - **Get expected values from Emacs, not from your head**: run
-  `elisp-agent eval` to see what a function returns, decide whether that is
+  `emacs-for-agents/tools/elisp-agent eval` to see what a function returns, decide whether that is
   right, then paste it into the test.
 
 ## Test first, and see it fail
@@ -76,10 +76,11 @@ into a temporary directory, then `-L` that directory).
   that need a display (`ediff-files`, `make-frame`), and to capture `message`
   output. Record the arguments and assert on them: the exact prompt text is
   behavior too.
-- **Load the function's library before mocking it.** If the function is
-  autoloaded, the first call loads the library, which redefines the
-  function and silently removes your mock. (`(require 'warnings)` before
-  mocking `display-warning`, for example.)
+- **Load the function's library before mocking it.** If the library gets
+  loaded while the mock is active (by a `require` or another autoloaded
+  call in the code under test), loading redefines the function and
+  silently removes your mock. (`(require 'warnings)` before mocking
+  `display-warning`, for example.)
 
 ## Testing commands and buffers
 

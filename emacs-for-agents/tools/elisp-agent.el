@@ -18,8 +18,14 @@
 ;; --require FEATURE, --packages (initialize installed packages).
 ;; (Not -r: Emacs itself takes -r, reverse video, from the command line.)
 ;;
+;; Options go before the command; for `eval' they must.
+;;
 ;; Output is one finding per line, as FILE:LINE: MESSAGE where possible.
 ;; The exit status is 0 when everything is fine and 1 otherwise.
+;;
+;; Compiling, describing, evaluating and testing run in a fresh
+;; `emacs --batch -Q' (see elisp-agent-child.el), because this Emacs has
+;; loaded libraries such as cl-lib that would hide a missing `require'.
 
 ;;; Code:
 
@@ -31,8 +37,17 @@
 (require 'checkdoc)
 (require 'warnings)                     ; before mocking display-warning
 (require 'info)
+(require 'check-declare)
 
 (defvar elisp-agent--failed nil "Non-nil once a check has failed.")
+
+(defconst elisp-agent--child-file
+  (expand-file-name "elisp-agent-child.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The file loaded into the clean Emacs that compiles, describes and tests.")
+
+(defvar elisp-agent--child-args nil
+  "Command-line arguments that give the clean Emacs the same options.")
 
 (defun elisp-agent--say (format-string &rest args)
   "Print FORMAT-STRING with ARGS on a line of its own to standard output."
@@ -45,21 +60,68 @@
 
 ;;;; Options
 
+(defun elisp-agent--option-value (option args)
+  "Return the value of OPTION, the first of ARGS, or signal an error."
+  (or (car args) (user-error "Option %s needs a value" option)))
+
 (defun elisp-agent--parse-options (args)
-  "Handle the common options in ARGS; return the remaining arguments."
+  "Handle the common options in ARGS; return the remaining arguments.
+Also record them in `elisp-agent--child-args' for the clean Emacs."
   (let (rest)
     (while args
       (let ((arg (pop args)))
         (pcase arg
-          ("-L" (push (expand-file-name (pop args)) load-path))
-          ("-l" (load (expand-file-name (pop args)) nil t))
-          ("--require" (require (intern (pop args))))
-          ("--packages" (require 'package)
-           (when-let* ((dir (getenv "ELISP_AGENT_PACKAGE_DIR")))
-             (setq package-user-dir dir))
-           (package-initialize))
+          ("-L" (let ((dir (expand-file-name (elisp-agent--option-value arg args))))
+                  (pop args)
+                  (push dir load-path)
+                  (setq elisp-agent--child-args
+                        (append elisp-agent--child-args (list "-L" dir)))))
+          ("-l" (let ((file (expand-file-name (elisp-agent--option-value arg args))))
+                  (pop args)
+                  (load file nil t)
+                  (setq elisp-agent--child-args
+                        (append elisp-agent--child-args (list "-l" file)))))
+          ("--require" (let ((feature (intern (elisp-agent--option-value arg args))))
+                         (pop args)
+                         (require feature)
+                         (setq elisp-agent--child-args
+                               (append elisp-agent--child-args
+                                       (list "--eval" (format "(require '%S)" feature))))))
+          ("--packages"
+           (let ((dir (getenv "ELISP_AGENT_PACKAGE_DIR"))
+                 (init "(progn (require 'package) %s (package-initialize))"))
+             (require 'package)
+             (when dir (setq package-user-dir dir))
+             (package-initialize)
+             (setq elisp-agent--child-args
+                   (append elisp-agent--child-args
+                           (list "--eval"
+                                 (format init (if dir (format "(setq package-user-dir %S)" dir) "")))))))
           (_ (push arg rest)))))
     (nreverse rest)))
+
+(defun elisp-agent--child (&rest args)
+  "Run a clean `emacs --batch -Q' with the common options and ARGS.
+It loads `elisp-agent--child-file' first.  Print its output and
+remember a failure if it exits with a non-zero status."
+  (with-temp-buffer
+    (let ((status (apply #'call-process
+                         (expand-file-name invocation-name invocation-directory)
+                         nil t nil "--batch" "-Q" "-l" elisp-agent--child-file
+                         (append elisp-agent--child-args args))))
+      (princ (buffer-string))
+      (unless (or (bobp) (= (char-before (point-max)) ?\n))
+        (terpri))
+      (unless (eq status 0)
+        (setq elisp-agent--failed t))
+      status)))
+
+(defun elisp-agent--existing-files (files)
+  "Return those of FILES that exist; report the others as failures."
+  (seq-filter (lambda (file)
+                (or (file-readable-p file)
+                    (progn (elisp-agent--fail "%s: no such file" file) nil)))
+              files))
 
 ;;;; check
 
@@ -111,80 +173,115 @@ sentence starting with a space.  If the indentation agrees, return
                     (skip-chars-backward " \t\n")
                     (elisp-agent--line (point))))))))
 
+(defun elisp-agent--readable-p ()
+  "Return non-nil if the Lisp reader can read the whole current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((last (point)))
+      (condition-case nil
+          (while t
+            (read (current-buffer))
+            (setq last (point)))
+        (end-of-file
+         ;; Also signaled for a form that is not closed: then text is left.
+         (goto-char last)
+         (forward-comment (buffer-size))
+         (eobp))
+        (error nil)))))
+
 (defun elisp-agent--check-structure (file)
   "Report unbalanced parentheses in FILE, in words.  Return non-nil if OK."
   (with-temp-buffer
     (insert-file-contents file)
     (emacs-lisp-mode)
-    (let ((ok t))
-      ;; A definition at column 0 that is nested inside another form
-      ;; almost always means the form before it lacks closing parens.
-      (goto-char (point-min))
-      (while (re-search-forward "^(" nil t)
-        (let* ((pos (match-beginning 0))
-               ;; `syntax-ppss' moves point to POS.
-               (ppss (save-excursion (syntax-ppss pos))))
-          (when (and (> (nth 0 ppss) 0) (not (nth 3 ppss)) (not (nth 4 ppss)))
-            (let ((outer (car (nth 9 ppss))))
-              (setq ok nil)
-              (elisp-agent--fail
-               "%s:%d: missing %d closing paren(s) in the form starting at line %d: %s ... (line %d starts a new top-level form inside it)%s"
-               file (elisp-agent--line outer) (nth 0 ppss) (elisp-agent--line outer)
-               (elisp-agent--form-name outer) (elisp-agent--line pos)
-               (elisp-agent--indent-hint outer pos t))))))
-      ;; Walk the top-level forms; a scan error pinpoints the rest.
-      (goto-char (point-min))
-      (let ((previous nil))
-        (while (and ok (progn (forward-comment (buffer-size)) (not (eobp))))
-          (let ((start (point)))
-            (cond
-             ((looking-at-p ")")
-              (setq ok nil)
-              (elisp-agent--fail "%s:%d: extra closing paren%s%s"
-                                 file (elisp-agent--line start)
-                                 (cond
-                                  ((null previous) "")
-                                  ;; An indented form at top level: a form
-                                  ;; above it was closed too early.
-                                  ((save-excursion (goto-char previous) (not (bolp)))
-                                   (format "; an earlier form was closed too early, so the indented form at line %d ended up at top level: %s"
-                                           (elisp-agent--line previous)
-                                           (elisp-agent--form-name previous)))
-                                  (t
-                                   (format "; the form starting at line %d has one ) too many: %s"
-                                           (elisp-agent--line previous)
-                                           (elisp-agent--form-name previous))))
-                                 (elisp-agent--indent-hint
-                                  (save-excursion
-                                    (if (re-search-backward "^(" nil t) (point) (point-min)))
-                                  start)))
-             ((condition-case nil (progn (forward-sexp 1) t) (scan-error nil))
-              (setq previous start))
-             (t
-              (setq ok nil)
-              (elisp-agent--fail "%s:%d: missing closing paren(s): this form is not closed before the end of the file: %s%s"
-                                 file (elisp-agent--line start)
-                                 (elisp-agent--form-name start)
-                                 (elisp-agent--indent-hint start (point-max) t)))))))
-      ok)))
+    (let ((problems nil))
+      (cl-letf (((symbol-function 'elisp-agent--fail)
+                 (lambda (&rest args) (push args problems))))
+        (elisp-agent--scan-structure file))
+      (cond
+       ((null problems) t)
+       ;; The reader is happy, but the paren scanner is not: character
+       ;; literals like ?( fool the scanner (and editors and indentation).
+       ((elisp-agent--readable-p)
+        (elisp-agent--fail "%s:%s: unescaped character literal(s) like ?( ?) ?; ?\" confuse Emacs's paren scanner, indentation and this tool; write ?\\( ?\\) ?\\; ?\\\" instead"
+                           file
+                           (let (lines)
+                             (goto-char (point-min))
+                             (while (re-search-forward "\\(?:^\\|[^\\]\\)\\?[][();\"]" nil t)
+                               ;; `syntax-ppss' moves point.
+                               (let ((ppss (save-excursion (syntax-ppss (1- (point))))))
+                                 (unless (or (nth 3 ppss) (nth 4 ppss))
+                                   (push (elisp-agent--line (point)) lines))))
+                             (mapconcat #'number-to-string (delete-dups (nreverse lines)) ",")))
+        nil)
+       (t
+        (dolist (problem (nreverse problems))
+          (apply #'elisp-agent--fail problem))
+        nil)))))
+
+(defun elisp-agent--scan-structure (file)
+  "Report the paren problems of FILE, which is in the current buffer."
+  (let ((ok t)
+        (reported nil))
+    ;; A definition at column 0 that is nested inside another form
+    ;; almost always means the form before it lacks closing parens.
+    ;; Report the first one for each unclosed form.
+    (goto-char (point-min))
+    (while (re-search-forward "^(" nil t)
+      (let* ((pos (match-beginning 0))
+             ;; `syntax-ppss' moves point to POS.
+             (ppss (save-excursion (syntax-ppss pos))))
+        (when (and (> (nth 0 ppss) 0) (not (nth 3 ppss)) (not (nth 4 ppss))
+                   (not (memq (car (nth 9 ppss)) reported)))
+          (let ((outer (car (nth 9 ppss))))
+            (push outer reported)
+            (setq ok nil)
+            (elisp-agent--fail
+             "%s:%d: missing %d closing paren(s) in the form starting at line %d: %s ... (line %d starts a new top-level form inside it)%s"
+             file (elisp-agent--line outer) (nth 0 ppss) (elisp-agent--line outer)
+             (elisp-agent--form-name outer) (elisp-agent--line pos)
+             (elisp-agent--indent-hint outer pos t))))))
+    ;; Walk the top-level forms; a scan error pinpoints the rest.
+    (goto-char (point-min))
+    (let ((previous nil))
+      (while (and ok (progn (forward-comment (buffer-size)) (not (eobp))))
+        (let ((start (point)))
+          (cond
+           ((looking-at-p ")")
+            (setq ok nil)
+            (elisp-agent--fail "%s:%d: extra closing paren%s%s"
+                               file (elisp-agent--line start)
+                               (cond
+                                ((null previous) "")
+                                ;; An indented form at top level: a form
+                                ;; above it was closed too early.
+                                ((save-excursion (goto-char previous) (not (bolp)))
+                                 (format "; an earlier form was closed too early, so the indented form at line %d ended up at top level: %s"
+                                         (elisp-agent--line previous)
+                                         (elisp-agent--form-name previous)))
+                                (t
+                                 (format "; the form starting at line %d has one ) too many: %s"
+                                         (elisp-agent--line previous)
+                                         (elisp-agent--form-name previous))))
+                               (elisp-agent--indent-hint
+                                (save-excursion
+                                  (if (re-search-backward "^(" nil t) (point) (point-min)))
+                                start)))
+           ((condition-case nil (progn (forward-sexp 1) t) (scan-error nil))
+            (setq previous start))
+           (t
+            (setq ok nil)
+            (elisp-agent--fail "%s:%d: missing closing paren(s): this form is not closed before the end of the file: %s%s"
+                               file (elisp-agent--line start)
+                               (elisp-agent--form-name start)
+                               (elisp-agent--indent-hint start (point-max) t)))))))
+    ok))
 
 (defun elisp-agent--byte-compile (file allow-warnings)
-  "Byte-compile FILE, printing warnings.
+  "Byte-compile FILE in a clean Emacs, printing warnings.
 Warnings count as failures unless ALLOW-WARNINGS."
-  (let* ((dest (make-temp-file "elisp-agent-" nil ".elc"))
-         (byte-compile-dest-file-function (lambda (_) dest))
-         (load-path (cons (file-name-directory (expand-file-name file)) load-path)))
-    (when (get-buffer byte-compile-log-buffer)
-      (kill-buffer byte-compile-log-buffer))
-    (unwind-protect
-        (if (not (byte-compile-file file))
-            (elisp-agent--fail "%s: byte-compilation failed (see the messages above)" file)
-          (let ((warnings (with-current-buffer (get-buffer-create byte-compile-log-buffer)
-                            (count-matches "Warning" (point-min) (point-max)))))
-            (when (and (> warnings 0) (not allow-warnings))
-              (elisp-agent--fail "%s: %d compiler warning(s) (see the messages above)"
-                                 file warnings))))
-      (delete-file dest))))
+  (elisp-agent--child "--eval" (format "(elisp-agent-child-compile %S %S)"
+                                       (expand-file-name file) (and allow-warnings t))))
 
 (defun elisp-agent--checkdoc (file)
   "Run checkdoc on FILE and report its findings."
@@ -195,6 +292,28 @@ Warnings count as failures unless ALLOW-WARNINGS."
       (checkdoc-file file))
     (dolist (finding (nreverse findings))
       (elisp-agent--fail "%s (checkdoc)" (string-trim finding)))))
+
+(defun elisp-agent--check-declare (file)
+  "Report `declare-function' forms in FILE that name a wrong file or arglist."
+  (let ((inhibit-message t))
+    (cl-letf (((symbol-function 'display-warning) #'ignore))
+      (dolist (entry (check-declare-file file))
+        (dolist (problem (cdr entry))
+          ;; PROBLEM is (FILE FUNCTION MESSAGE).
+          (elisp-agent--fail "%s:%d: declare-function %s: %s in %s%s (check-declare)"
+                             file
+                             (with-temp-buffer
+                               (insert-file-contents file)
+                               (if (re-search-forward
+                                    (concat "(declare-function +" (regexp-quote (nth 1 problem)) "\\_>")
+                                    nil t)
+                                   (elisp-agent--line (point))
+                                 1))
+                             (nth 1 problem) (nth 2 problem)
+                             (file-name-nondirectory (car entry))
+                             (if (equal (nth 2 problem) "file not found")
+                                 "; for a package that is not part of Emacs, write \"ext:FILE\""
+                               "")))))))
 
 (declare-function relint-buffer "ext:relint" (buffer))
 
@@ -215,11 +334,15 @@ Warnings count as failures unless ALLOW-WARNINGS."
   "Check the files in ARGS."
   (let ((doc (member "--doc" args))
         (regexp (member "--regexp" args))
-        (allow-warnings (member "--allow-warnings" args)))
-    (dolist (file (cl-remove-if (lambda (a) (string-prefix-p "--" a)) args))
+        (allow-warnings (member "--allow-warnings" args))
+        (files (seq-remove (lambda (a) (string-prefix-p "--" a)) args)))
+    (unless files
+      (elisp-agent--fail "Usage: elisp-agent check [--doc] [--regexp] [--allow-warnings] FILE..."))
+    (dolist (file (elisp-agent--existing-files files))
       ;; Compiling a file with broken structure only adds noise.
       (when (elisp-agent--check-structure file)
         (elisp-agent--byte-compile file allow-warnings)
+        (elisp-agent--check-declare file)
         (when doc (elisp-agent--checkdoc file))
         (when regexp (elisp-agent--relint file))))))
 
@@ -228,20 +351,27 @@ Warnings count as failures unless ALLOW-WARNINGS."
 (defun elisp-agent-forms (args)
   "List the top-level forms of the file in ARGS with their line ranges."
   (let ((file (car args)))
-    (with-temp-buffer
-      (insert-file-contents file)
-      (emacs-lisp-mode)
-      (goto-char (point-min))
-      (condition-case nil
-          (while (progn (forward-comment (buffer-size)) (not (eobp)))
-            (let ((start (point)))
-              (forward-sexp 1)
-              (elisp-agent--say "%d-%d: %s" (elisp-agent--line start)
-                                (elisp-agent--line (point))
-                                (elisp-agent--form-name start))))
-        (scan-error
-         (elisp-agent--fail "%s: stops here, the structure is broken; run `elisp-agent check'"
-                            file))))))
+    (cond
+     ((null file) (elisp-agent--fail "Usage: elisp-agent forms FILE"))
+     ((elisp-agent--existing-files (list file))
+      (elisp-agent--forms file)))))
+
+(defun elisp-agent--forms (file)
+  "List the top-level forms of FILE with their line ranges."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (emacs-lisp-mode)
+    (goto-char (point-min))
+    (condition-case nil
+        (while (progn (forward-comment (buffer-size)) (not (eobp)))
+          (let ((start (point)))
+            (forward-sexp 1)
+            (elisp-agent--say "%d-%d: %s" (elisp-agent--line start)
+                              (elisp-agent--line (point))
+                              (elisp-agent--form-name start))))
+      (scan-error
+       (elisp-agent--fail "%s: stops here, the structure is broken; run `elisp-agent check'"
+                          file)))))
 
 ;;;; indent
 
@@ -250,15 +380,23 @@ Warnings count as failures unless ALLOW-WARNINGS."
 With \"--fix\" in ARGS, rewrite the files with Emacs's indentation instead.
 A misplaced paren changes the indentation of the lines after it, so
 the first reported line is usually just after the mistake."
-  (let ((fix (member "--fix" args)))
-    (dolist (file (remove "--fix" args))
-      (elisp-agent--indent-file file fix))))
+  (let ((fix (member "--fix" args))
+        (files (remove "--fix" args)))
+    (unless files
+      (elisp-agent--fail "Usage: elisp-agent indent [--fix] FILE..."))
+    (dolist (file (elisp-agent--existing-files files))
+      (if (and fix (not (elisp-agent--check-structure file)))
+          ;; Re-indenting would move the code to match the wrong parens
+          ;; and erase the indentation that shows where they belong.
+          (elisp-agent--fail "%s: not re-indented; fix the parens first (see above)" file)
+        (elisp-agent--indent-file file fix)))))
 
 (defun elisp-agent--indent-file (file fix)
   "Report up to 10 lines of FILE that Emacs would indent differently.
 With FIX, write FILE back indented instead."
   (with-temp-buffer
     (insert-file-contents file)
+    (setq buffer-file-coding-system last-coding-system-used) ; write it back the same way
     (emacs-lisp-mode)
     (setq indent-tabs-mode nil)         ; count columns, and never write tabs
     ;; Macros only indent correctly once they are defined: load the
@@ -276,8 +414,14 @@ With FIX, write FILE back indented instead."
       (let ((inhibit-message t))
         (indent-region (point-min) (point-max)))
       (if fix
-          (let ((coding-system-for-write 'utf-8-unix))
-            (write-region nil nil file nil 'silent))
+          (let ((changed (cl-count-if-not #'identity
+                                          (cl-mapcar #'equal before
+                                                     (split-string (buffer-string) "\n")))))
+            (if (zerop changed)
+                (elisp-agent--say "%s: already indented" file)
+              (let ((coding-system-for-write buffer-file-coding-system))
+                (write-region nil nil file nil 'silent))
+              (elisp-agent--say "%s: re-indented %d line(s)" file changed)))
         (cl-loop for old in before
                  for new in (split-string (buffer-string) "\n")
                  for line from 1
@@ -291,74 +435,18 @@ With FIX, write FILE back indented instead."
 
 ;;;; describe
 
-(defun elisp-agent--first-line (doc)
-  "Return the first line of docstring DOC."
-  (if doc (car (split-string doc "\n")) "(no documentation)"))
-
-(defun elisp-agent--similar (name)
-  "Defined symbols whose names are close to NAME.
-That is, names a few edits away, and defined tails of NAME: for
-\"string-length\" that finds \"length\"."
-  (let ((parts (split-string name "-"))
-        found)
-    (while (cdr parts)
-      (setq parts (cdr parts))
-      (let ((tail (intern-soft (string-join parts "-"))))
-        (when (and tail (fboundp tail)) (push (symbol-name tail) found))))
-    (mapatoms (lambda (s)
-                (when (and (or (fboundp s) (boundp s))
-                           (let ((n (symbol-name s)))
-                             (and (< (abs (- (length n) (length name))) 4)
-                                  (<= (string-distance n name) 2))))
-                  (push (symbol-name s) found))))
-    (sort (delete-dups found) #'string<)))
-
 (defun elisp-agent-describe (args)
-  "Describe the symbols in ARGS."
+  "Describe the symbols in ARGS, each as a fresh clean Emacs sees it."
+  (unless args
+    (elisp-agent--fail "Usage: elisp-agent describe SYMBOL..."))
   (dolist (name args)
-    (let ((sym (intern-soft name)))
-      (cond
-       ((and sym (fboundp sym))
-        (let ((def (symbol-function sym)))
-          (when (autoloadp def)
-            (ignore-errors (autoload-do-load def sym)))
-          (elisp-agent--say "%s: %s %S" name
-                            (cond ((special-form-p sym) "special form")
-                                  ((macrop sym) "macro")
-                                  ((commandp sym) "command")
-                                  (t "function"))
-                            (help-function-arglist sym t))
-          (elisp-agent--say "  %s" (elisp-agent--first-line
-                                    (ignore-errors (documentation sym t))))
-          (when-let* ((file (symbol-file sym 'defun)))
-            (elisp-agent--say "  defined in %s" file))
-          (when-let* ((obsolete (get sym 'byte-obsolete-info)))
-            (elisp-agent--say "  OBSOLETE, use %s instead" (car obsolete)))))
-       ((and sym (boundp sym))
-        (elisp-agent--say "%s: variable, value %S" name (symbol-value sym))
-        (elisp-agent--say "  %s" (elisp-agent--first-line
-                                  (documentation-property
-                                   sym 'variable-documentation t))))
-       (t
-        (elisp-agent--fail "%s: NOT DEFINED (load or require its library first?)%s" name
-                           (if-let* ((similar (elisp-agent--similar name)))
-                               (format "  Similar: %s" (string-join similar " "))
-                             "")))))))
+    (elisp-agent--child "--eval" (format "(elisp-agent-child-describe %S)" name))))
 
 ;;;; builtins
 
 (defun elisp-agent-builtins (args)
   "List shortdoc groups, or the functions of the group in ARGS."
-  (require 'shortdoc)
-  (if (null args)
-      (elisp-agent--say "Groups: %s\nUse: elisp-agent builtins GROUP"
-                        (mapconcat (lambda (g) (symbol-name (car g))) shortdoc--groups " "))
-    (dolist (item (cdr (assq (intern (car args)) shortdoc--groups)))
-      (cond ((stringp item) (elisp-agent--say "\n;; %s" item))
-            ((and (consp item) (symbolp (car item)) (fboundp (car item)))
-             (elisp-agent--say "%-32s %s" (car item)
-                               (elisp-agent--first-line
-                                (ignore-errors (documentation (car item) t)))))))))
+  (elisp-agent--child "--eval" (format "(elisp-agent-child-builtins %S)" (car args))))
 
 ;;;; info
 
@@ -385,14 +473,18 @@ Texinfo writes spaces as dashes and other characters as _00XX."
                        node ""))))
 
 (defun elisp-agent--info-visit (manual node)
-  "Go to NODE of MANUAL in the Info buffer; return nil if MANUAL is missing."
-  (condition-case nil
-      (progn (Info-find-node manual node) t)
-    (user-error
-     (elisp-agent--fail "Manual %s is not installed. Installed: %s\n  Online, if it is an Emacs manual: %s\n  (On Debian and Ubuntu the Emacs manuals are in the package emacs-common-non-dfsg.)"
-                        manual (string-join (elisp-agent--info-manuals) " ")
-                        (elisp-agent--info-url manual node))
-     nil)))
+  "Go to NODE of MANUAL in the Info buffer; return nil if that fails."
+  (if (Info-find-file manual t)
+      (condition-case nil
+          (progn (Info-find-node manual node) t)
+        (user-error
+         (elisp-agent--fail "%s: no node \"%s\". List the nodes with: elisp-agent info %s; or search: elisp-agent info --index %s TOPIC"
+                            manual node manual manual)
+         nil))
+    (elisp-agent--fail "Manual %s is not installed. Installed: %s\n  Online, if it is an Emacs manual: %s\n  (On Debian and Ubuntu the Emacs manuals are in the package emacs-common-non-dfsg.)"
+                       manual (string-join (elisp-agent--info-manuals) " ")
+                       (elisp-agent--info-url manual node))
+    nil))
 
 (defun elisp-agent--info-index (manual topic)
   "List the index entries of MANUAL that contain TOPIC."
@@ -445,48 +537,64 @@ entries.  --search MANUAL REGEXP: nodes with matching text."
 ;;;; eval
 
 (defun elisp-agent-eval (args)
-  "Evaluate the expressions in ARGS and print each result."
-  (let ((pos 0)
-        (text (string-join args " ")))
-    (condition-case err
-        (while (string-match-p "[^ \t\n]" (substring text pos))
-          (pcase-let ((`(,form . ,end) (read-from-string text pos)))
-            (setq pos end)
-            (elisp-agent--say "%S" (eval form t))))
-      (error (elisp-agent--fail "ERROR: %S" err)))))
+  "Evaluate the expressions in ARGS in a clean Emacs and print each result."
+  (if (null args)
+      (elisp-agent--fail "Usage: elisp-agent eval EXPRESSION...")
+    (elisp-agent--child "--eval" (format "(elisp-agent-child-eval %S)" (string-join args " ")))))
 
 ;;;; test
 
 (defun elisp-agent-test (args)
-  "Run ERT on the test files in ARGS, limited by \"-s SELECTOR\" if given."
+  "Run ERT in a clean Emacs on the test files in ARGS.
+\"-s SELECTOR\" in ARGS runs only the tests whose names match it."
   (let ((selector t) files)
     (while args
       (let ((arg (pop args)))
         (if (equal arg "-s")
-            (setq selector (pop args))
+            (setq selector (or (pop args) (user-error "Option -s needs a regexp")))
           (push arg files))))
-    (dolist (file (nreverse files))
-      (load (expand-file-name file) nil t))
-    (ert-run-tests-batch-and-exit selector)))
+    (setq files (nreverse files))
+    (cond
+     ((null files) (elisp-agent--fail "Usage: elisp-agent test FILE... [-s SELECTOR]"))
+     ((setq files (elisp-agent--existing-files files))
+      (apply #'elisp-agent--child
+             (append '("-l" "ert")
+                     (mapcan (lambda (f) (list "-l" (expand-file-name f))) files)
+                     (list "--eval" (format "(elisp-agent-child-test %S)" selector))))))))
 
 ;;;; Main
 
 (defun elisp-agent-main ()
   "Entry point for the `elisp-agent' script."
-  (let* ((args (elisp-agent--parse-options command-line-args-left))
-         (command (pop args)))
+  (let ((args command-line-args-left))
     (setq command-line-args-left nil)
-    (pcase command
-      ("check" (elisp-agent-check args))
-      ("forms" (elisp-agent-forms args))
-      ("indent" (elisp-agent-indent args))
-      ("describe" (elisp-agent-describe args))
-      ("builtins" (elisp-agent-builtins args))
-      ("info" (elisp-agent-info args))
-      ("eval" (elisp-agent-eval args))
-      ("test" (elisp-agent-test args))
-      (_ (elisp-agent--fail "Usage: elisp-agent check|forms|indent|describe|builtins|info|eval|test ...")))
+    (condition-case err
+        (elisp-agent--run args)
+      (error (elisp-agent--fail "elisp-agent: %s" (error-message-string err))))
     (kill-emacs (if elisp-agent--failed 1 0))))
+
+(defun elisp-agent--run (args)
+  "Run the command in ARGS, after the options before it."
+  (let ((before nil))
+    ;; Options before the command; for all but eval, also after it.
+    (while (and args (string-prefix-p "-" (car args)))
+      (push (pop args) before)
+      (when (member (car before) '("-L" "-l" "--require"))
+        (push (pop args) before)))
+    (elisp-agent--parse-options (nreverse before))
+    (let ((command (pop args)))
+      (unless (equal command "eval")
+        (setq args (elisp-agent--parse-options args)))
+      (pcase command
+        ("check" (elisp-agent-check args))
+        ("forms" (elisp-agent-forms args))
+        ("indent" (elisp-agent-indent args))
+        ("describe" (elisp-agent-describe args))
+        ("builtins" (elisp-agent-builtins args))
+        ("info" (elisp-agent-info args))
+        ("eval" (elisp-agent-eval args))
+        ("test" (elisp-agent-test args))
+        (_ (elisp-agent--fail "Usage: elisp-agent [OPTIONS] check|forms|indent|describe|builtins|info|eval|test ..."))))))
 
 (provide 'elisp-agent)
 ;;; elisp-agent.el ends here

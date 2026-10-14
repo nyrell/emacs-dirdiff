@@ -1,7 +1,7 @@
 # Templates
 
 Copy, rename `mypkg`, delete what you do not need. The package file (with
-the mode added) and the test file pass `elisp-agent check --doc` and
+the mode added) and the test file pass `emacs-for-agents/tools/elisp-agent check --doc` and
 `indent` as they are; check the test file with `-L .` so it finds the
 package.
 

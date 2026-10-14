@@ -13,10 +13,10 @@ what `package-lint` and `checkdoc` enforce. Skeletons are in
   `;; URL:`, then `;;; Commentary:`, `;;; Code:`, and finally
   `(provide 'name)` and `;;; name.el ends here`.
 - `Package-Requires` must name the oldest Emacs you support, and you must not
-  use anything newer. `describe` shows where a function comes from; the
-  manual and `NEWS` say when it appeared.
+  use anything newer. For ways to check, see
+  [verification.md](verification.md#which-emacs-version-has-it).
 - Put closing parentheses on the last line of a form, never alone on a line.
-  Use Emacs's indentation (`elisp-agent indent --fix`).
+  Use Emacs's indentation (`emacs-for-agents/tools/elisp-agent indent --fix FILE`).
 
 ## Naming
 
@@ -36,7 +36,13 @@ what `package-lint` and `checkdoc` enforce. Skeletons are in
   minor mode the user turns on.
 - `require` what you use at top level. Use `(declare-function f "lib")` and
   `(defvar some-var)` to silence the compiler for optional dependencies that
-  you load only when needed, with `require` inside the function.
+  you load only when needed, with `require` inside the function. For a
+  package that is not part of Emacs, write `"ext:lib"`; `check` verifies
+  these declarations.
+- `(require 'cl-lib)` and the `cl-` names (`cl-loop`, `cl-incf`,
+  `cl-flet`), never the obsolete `cl` library or its unprefixed names
+  (`loop`, `incf`, `flet`, `lexical-let`): models trained on old code
+  still write them.
 - `;;;###autoload` on commands users call, so the package needn't be loaded
   until then.
 - `with-eval-after-load` is for user configuration, not for libraries. A
@@ -54,6 +60,19 @@ what `package-lint` and `checkdoc` enforce. Skeletons are in
 - **Before let-binding a variable from another library, `require` it.** If
   the library is not loaded yet, the `let` is lexical and has no effect.
   See [pitfalls.md](pitfalls.md).
+
+## Data
+
+- Compare with the right predicate: `eq` for symbols and identity,
+  `eql` for numbers, `equal` for strings, lists and other structure,
+  `string=` for strings when you want to say so. `(eq "a" "a")` is nil.
+  `memq`/`assq` use `eq`; `member`/`assoc` use `equal`.
+- `sort`, `nconc`, `nreverse`, `delete` and `delq` may change their
+  argument. Always use the return value (`(setq l (sort l #'<))`), and
+  never apply them to a quoted constant like `'(3 1 2)`: copy it, or
+  build it with `list`.
+- Alists: `alist-get` (with `setf` to change one); plists: `plist-get`;
+  many lookups: a hash table with `:test #'equal` for string keys.
 
 ## Functions and commands
 
@@ -121,7 +140,7 @@ write Perl syntax that silently matches something else.
 - `string-match` and `re-search-forward` change the match data; use
   `string-match-p` when you only test, and `save-match-data` in functions
   that others call between a match and `match-string`.
-- `elisp-agent check --regexp` runs relint, which finds most of these.
+- `emacs-for-agents/tools/elisp-agent check --regexp` runs relint, which finds most of these.
 
 ## Files and processes
 
@@ -146,10 +165,11 @@ write Perl syntax that silently matches something else.
 
 ```sh
 T=emacs-for-agents/tools/elisp-agent
-$T check --doc *.el          # structure, zero warnings, checkdoc
+$T -L . check --doc *.el     # structure, zero warnings, declarations, checkdoc
 $T indent *.el               # standard indentation
 $T -L . test test/*-test.el  # tests
-# with relint and package-lint installed (verification.md, step 4):
-$T --packages check --regexp *.el
-# MELPA: package-lint
+# Regexps: needs relint, from the user's packages or your own directory
+# (verification.md, step 4), e.g.:
+ELISP_AGENT_PACKAGE_DIR=$D $T --packages -L . check --regexp *.el
+# MELPA: package-lint (verification.md, step 4)
 ```

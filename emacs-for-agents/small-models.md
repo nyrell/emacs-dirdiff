@@ -6,15 +6,22 @@ never run. The cure is the same each time: **let Emacs check, not the
 model**, and make every step small enough that the check pinpoints the
 mistake.
 
+Commands are run from the project root. Copy them exactly, with the full
+path `emacs-for-agents/tools/elisp-agent`.
+
 ## The loop
 
 ```
 1. Pick ONE function to write or change.
-2. describe every function you are unsure of      (elisp-agent describe)
-3. write or replace the WHOLE top-level form
-4. elisp-agent check FILE                        (structure, then warnings)
-5. elisp-agent eval / test                        (does it do the right thing?)
-6. only then: next function
+2. Look up every function you are unsure of:
+     emacs-for-agents/tools/elisp-agent describe NAME
+3. Write or replace the WHOLE top-level form.
+4. Check it (structure, then warnings):
+     emacs-for-agents/tools/elisp-agent -L . check FILE
+5. Try it (does it do the right thing?):
+     emacs-for-agents/tools/elisp-agent -L . --require mypkg eval '(mypkg-f 1)'
+     emacs-for-agents/tools/elisp-agent -L . test test/mypkg-test.el -s NAME
+6. Only then: the next function.
 ```
 
 Never make several changes before checking. If two edits are pending and the
@@ -23,50 +30,51 @@ check fails, the model cannot tell which edit broke it.
 ## Parentheses
 
 - **Do not count parentheses by eye**, and do not reason about them in
-  long chains of thought. Run `elisp-agent check`. It says, in words,
-  which form is missing parens and where the next form starts, and its
-  hint names the line where your indentation and your parens disagree.
+  long chains of thought. Run `check`. It says, in words, which form is
+  missing parens and where the next form starts, and its hint names the
+  line where your indentation and your parens disagree.
 - **Indent carefully; it is how the tool finds your paren mistakes.**
   Models get indentation right more often than parentheses. Write each
   line at the depth you mean, and the hint will point at the missing or
   extra `)`.
 - **Replace whole top-level forms.** Get the line range from
-  `elisp-agent forms FILE`, write the complete new `defun`, and replace the
-  lines. Inserting or deleting single `)` characters is where most
-  structure errors come from.
+  `emacs-for-agents/tools/elisp-agent forms FILE`, write the complete new
+  `defun`, and replace the lines. Inserting or deleting single `)`
+  characters is where most structure errors come from.
 - **Keep forms short.** A function of 10–20 lines is easy to get right; one
   of 80 lines is not. Split into helpers.
 - **Write the closing parens at the end of the last line** of a form,
   `(message "done"))))`, never on lines of their own.
-- **Use indentation as a second opinion.** `elisp-agent indent FILE` shows
-  where Emacs would indent differently; the first such line is right after
-  a misplaced paren. Once `check` passes, `elisp-agent indent --fix FILE`
-  normalizes the layout.
-- If a form keeps failing the structure check after two attempts,
-  **delete it and write it again from scratch**, from the top, in one go.
+- **Escape parens in character literals**: `?\(`, `?\)`, `?\;`, `?\"`.
+  Unescaped ones are valid Lisp but break the paren check and indentation.
+- **Once `check` passes**, `emacs-for-agents/tools/elisp-agent indent --fix FILE`
+  normalizes the layout. It refuses files with broken parens.
 
 ## Invented functions and wrong arguments
 
 - `describe` every function you have not seen in this codebase or in the
-  output of `describe` already: `elisp-agent describe seq-reduce`. It shows
-  the arguments and suggests real names for invented ones
+  output of `describe` already. It shows how to call it, says which
+  `require` it needs, and suggests real names for invented ones
   (`string-length` → `length`).
-- Functions from libraries need the library: `--require seq`.
+- Add the `require` that `describe` names, e.g. `(require 'subr-x)`, at
+  the top of the file.
 - The byte-compiler catches the rest: "the function `foo` is not known to be
   defined", "called with 1 argument, but requires 2". **Treat every warning
   as an error.**
 - When unsure what something returns, `eval` it instead of guessing:
-  `elisp-agent eval '(split-string "a,,b" ",")'`.
+  `emacs-for-agents/tools/elisp-agent eval '(split-string "a,,b" ",")'`.
 - For a concept rather than one function (hooks, keymaps, text
   properties), read the manual section instead of guessing:
-  `elisp-agent info --index elisp keymap`, then print the node it names.
-  Read only the node you need; whole manuals do not fit in a small context.
+  `emacs-for-agents/tools/elisp-agent info --index elisp keymap`, then
+  print the node it names. Read only the node you need; whole manuals do
+  not fit in a small context.
 
 ## Testing
 
 - Write the test before the code, with expected values that are obviously
   right (small inputs, written out in full).
-- Run one test at a time while working: `elisp-agent test FILE -s NAME`.
+- Run one test at a time while working:
+  `emacs-for-agents/tools/elisp-agent -L . test test/mypkg-test.el -s NAME`.
 - Read the failure: ERT prints the form and the actual value. Fix the code
   or, if the expected value was wrong, check it with `eval` before changing
   the test.
@@ -82,14 +90,14 @@ Prefer constructs that are hard to get wrong:
 | Simple `pcase` patterns (constants, strings) | Backquote patterns with nested commas |
 | A named helper function | A long `lambda` inside a call |
 | `if-let*` / `when-let*` | Nested `let` + `if` |
-| Built-in functions (`use-builtins.md`) | Hand-written helpers |
+| Built-in functions ([use-builtins.md](use-builtins.md)) | Hand-written helpers |
 
 ## Stop rules
 
-- Same error three times in a row: stop, rewrite the form from scratch, or
-  ask the human. Do not keep trying variations.
-- More than about five attempts at one function: the design is probably
-  wrong; describe the problem to the human instead.
+- **Two failed checks of the same form:** delete the form and write it
+  again from scratch, from the top, in one go.
+- **Two more failures after that:** stop. Describe the problem to the
+  human instead of trying variations.
 - Never claim the code works without the output of `check` and `test`.
 
 ## For the person running the model

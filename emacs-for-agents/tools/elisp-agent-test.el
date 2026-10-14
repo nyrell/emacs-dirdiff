@@ -22,6 +22,80 @@
                 elisp-agent--failed))
       (delete-file file))))
 
+(defun elisp-agent-test--output (fn &rest args)
+  "Call FN with ARGS; return (OUTPUT . FAILED)."
+  (let ((elisp-agent--failed nil))
+    (cons (with-output-to-string (funcall fn args)) elisp-agent--failed)))
+
+(ert-deftest elisp-agent-test-missing-require ()
+  "Compiling happens in a clean Emacs, so a missing require is reported."
+  (let ((result (elisp-agent-test--run
+                 #'elisp-agent-check
+                 ";;; -*- lexical-binding: t; -*-\n(defun a (l) (cl-remove-if #'null l))\n")))
+    (should (cdr result))
+    (should (string-match-p "cl-remove-if.*not known to be defined" (car result)))))
+
+(ert-deftest elisp-agent-test-describe-clean ()
+  "Describe answers as a clean Emacs: what needs a require, how to call it."
+  (let ((result (elisp-agent-test--output #'elisp-agent-describe "cl-remove-if" "if" "point-at-eol")))
+    (should (cdr result))
+    (should (string-match-p "cl-remove-if: NOT DEFINED in a clean Emacs; add (require 'cl-lib)" (car result)))
+    (should (string-match-p "(cl-remove-if PREDICATE SEQ \\[KEYWORD VALUE\\]\\.\\.\\.)" (car result)))
+    (should (string-match-p "if: special form (if COND THEN ELSE\\.\\.\\.)" (car result)))
+    (should (string-match-p "OBSOLETE since 29.1: use `line-end-position' or `pos-eol' instead\\.\n"
+                            (car result))))
+  (should (string-match-p "s\\.el, a package that is not part of Emacs\\. Built in: string-trim"
+                          (car (elisp-agent-test--output #'elisp-agent-describe "s-trim")))))
+
+(ert-deftest elisp-agent-test-character-literals ()
+  "?( confuses the paren scanner but not the reader: say that, not \"missing paren\"."
+  (should (equal (elisp-agent-test--run #'elisp-agent-check
+                                        ";;; -*- lexical-binding: t; -*-\n(defun a () (list ?; ?( ?)))\n")
+                 '("F:2: unescaped character literal(s) like ?( ?) ?; ?\" confuse Emacs's paren scanner, indentation and this tool; write ?\\( ?\\) ?\\; ?\\\" instead\n" . t))))
+
+(ert-deftest elisp-agent-test-indent-fix ()
+  "--fix leaves broken files alone and keeps the line endings."
+  (let ((result (elisp-agent-test--run #'elisp-agent-indent "(defun a ()\n  (list 1\n" "--fix")))
+    (should (cdr result))
+    (should (string-match-p "F: not re-indented; fix the parens first" (car result))))
+  (let ((file (make-temp-file "elisp-agent-test-" nil ".el")))
+    (unwind-protect
+        (let ((coding-system-for-write 'no-conversion))
+          (write-region "(defun a ()\r\n1)\r\n" nil file)
+          (elisp-agent-test--output #'elisp-agent-indent "--fix" file)
+          (should (equal (with-temp-buffer
+                           (set-buffer-multibyte nil)
+                           (insert-file-contents-literally file)
+                           (buffer-string))
+                         "(defun a ()\r\n  1)\r\n")))
+      (delete-file file))))
+
+(ert-deftest elisp-agent-test-eval ()
+  "Each expression gets its value or its error, in a clean Emacs."
+  (should (equal (elisp-agent-test--output #'elisp-agent-eval "1" "(car 5)" "(+ 1 2)")
+                 '("1\nERROR: Wrong type argument: listp, 5\n3\n" . t))))
+
+(ert-deftest elisp-agent-test-usage-errors ()
+  "Running with nothing to do fails instead of passing silently."
+  (should (cdr (elisp-agent-test--output #'elisp-agent-check)))
+  (should (cdr (elisp-agent-test--output #'elisp-agent-builtins "no-such-group")))
+  (should (cdr (elisp-agent-test--run #'elisp-agent-test "(require 'ert)\n" "-s" "nothing"))))
+
+(ert-deftest elisp-agent-test-one-report-per-form ()
+  "An unclosed form is reported once, not once for every form after it."
+  (should (= 1 (cl-count ?\n (car (elisp-agent-test--run
+                                   #'elisp-agent-check
+                                   "(defun a ()\n  (list 1\n\n(defun b () 2)\n\n(defun c () 3)\n"))))))
+
+(ert-deftest elisp-agent-test-check-declare ()
+  "Wrong `declare-function' forms are reported, with the ext: hint."
+  (let ((result (elisp-agent-test--run
+                 #'elisp-agent-check
+                 ";;; -*- lexical-binding: t; -*-\n(declare-function no-such-fn \"subr-x\" ())\n(declare-function other-fn \"no-such-lib\" ())\n")))
+    (should (cdr result))
+    (should (string-match-p "F:2: declare-function no-such-fn: function not found" (car result)))
+    (should (string-match-p "F:3: declare-function other-fn: file not found.*ext:FILE" (car result)))))
+
 (ert-deftest elisp-agent-test-missing-paren ()
   (should (equal (elisp-agent-test--run
                   #'elisp-agent-check
@@ -106,6 +180,7 @@
           (should (cdr (funcall run "--index" file "remove-hook")))
           (should (equal (funcall run "--search" file "a function")
                          '("(M) Hooks: Use add-hook to add a function.\n" . nil)))
+          (should (string-match-p "no node \"Nope\"" (car (funcall run file "Nope"))))
           (should (string-match-p "not installed.*\n.*/html_node/no-such-manual/M_002dx\\.html"
                                   (car (funcall run "no-such-manual" "M-x")))))
       (delete-file file))))

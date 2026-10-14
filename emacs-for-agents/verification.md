@@ -2,15 +2,16 @@
 
 Climb the ladder in order; each step is slower but catches things the
 previous one cannot. Do not report something as working until it has passed
-the steps that apply.
+the steps that apply. `$T` is `emacs-for-agents/tools/elisp-agent`, run from
+the project root.
 
 | # | Step | Catches | How |
 |---|---|---|---|
-| 0 | Structure | Missing or extra parens | `elisp-agent check` |
-| 1 | Byte-compile | Unknown functions, wrong arity, free variables, typos | `elisp-agent check` (zero warnings) |
+| 0 | Structure | Missing or extra parens | `$T check` |
+| 1 | Byte-compile | Unknown functions, missing `require`, wrong arity, free variables | `$T -L . check` (zero warnings) |
 | 2 | Load in `emacs -Q` | Missing `require`, load-time errors | `emacs --batch -Q -L . --eval "(require 'mypkg)"` |
-| 3 | Unit tests | Wrong results | `elisp-agent test` (see [testing.md](testing.md)) |
-| 4 | Lint | Docstrings, headers, naming, MELPA rules, regexps | `check --doc --regexp`, `indent`, package-lint |
+| 3 | Unit tests | Wrong results | `$T -L . test` (see [testing.md](testing.md)) |
+| 4 | Lint | Docstrings, headers, naming, MELPA rules, regexps, Emacs version | `$T check --doc --regexp`, `$T indent`, package-lint |
 | 5 | Command loop in batch | Hooks, keymaps, real key sequences | `execute-kbd-macro` |
 | 6 | Live Emacs | Display, windows, frames, interaction with the user's setup | `emacsclient --eval` |
 | 7 | Screenshot | What it actually looks like | `x-export-frames` |
@@ -21,10 +22,12 @@ the steps that apply.
 not later on someone else's machine. Load with the dependencies the package
 declares and nothing else.
 
-## 4. Linters without touching the user's packages
+## 4. Linters without touching the user's config
 
-Install package-lint (MELPA) and relint (GNU ELPA) into a directory of
-your own, never into the user's `~/.emacs.d`:
+**Never change the user's Emacs configuration**: no installing packages
+into `~/.emacs.d`, no edits to `init.el` or the custom file. Reading it is
+fine: `$T --packages` uses packages the user has installed. If package-lint
+or relint is missing, install it into a directory of your own:
 
 ```sh
 D=$(mktemp -d)
@@ -33,8 +36,24 @@ emacs --batch -Q --eval "(progn (setq package-user-dir \"$D\") (package-initiali
   (package-refresh-contents) (package-install 'package-lint) (package-install 'relint))"
 emacs --batch -Q --eval "(progn (setq package-user-dir \"$D\") (package-initialize) (require 'package-lint))" \
   -L . --eval '(setq package-lint-main-file "mypkg.el")' -f package-lint-batch-and-exit *.el
-ELISP_AGENT_PACKAGE_DIR=$D elisp-agent --packages -L . check --regexp *.el
+ELISP_AGENT_PACKAGE_DIR=$D emacs-for-agents/tools/elisp-agent --packages -L . check --regexp *.el
 ```
+
+## Which Emacs version has it?
+
+Code must not use anything newer than the Emacs in `Package-Requires`.
+There are several ways to find out; use more than one when it matters:
+
+- `$T describe NAME` prints the first NEWS heading that mentions it, e.g.
+  `first in NEWS: Emacs 28: ** New function 'string-pad'.` That is
+  usually when it appeared (a heading can also be about a change).
+- package-lint (step 4) reports uses of functions and variables newer than
+  the package's declared minimum: "You should depend on (emacs "28.1") or
+  the compat package if you need `string-pad'".
+- The manual and NEWS: `$T info --search elisp NAME`, or search the NEWS
+  files directly: `grep -n "NAME" $(emacs --batch -Q --eval '(princ data-directory)')/NEWS*`.
+- Run the checks with the older Emacs, if it is installed:
+  `EMACS=emacs-29 $T -L . check *.el`, then `test`.
 
 ## 5. Real key sequences in batch
 
@@ -66,6 +85,7 @@ session**. Rules:
   That is the point of this step; report what you find.
 - Calls through `emacsclient --eval` also skip the command loop; use
   `execute-kbd-macro` inside the evaluated form for real key handling.
+- Never change the user's configuration (see step 4).
 - For anything disruptive, start a separate server: `emacs -Q --daemon=test`
   and `emacsclient -s test --eval ...`; stop it with `(kill-emacs)`.
 - **The user may have the file open with unsaved changes.** Before writing
@@ -98,7 +118,7 @@ the buffer text cannot see.
 
 ## When something fails
 
-- **Get the backtrace.** `elisp-agent eval` prints only the error. A
+- **Get the backtrace.** `$T eval` prints only the error. A
   plain batch run prints the whole call stack, which shows where it
   happened:
 
@@ -130,7 +150,7 @@ the buffer text cannot see.
 
 - Use a timeout when running Emacs from a shell (`timeout 60 emacs --batch …`).
   A hang in batch looks the same as slow work.
-- Read the output; do not just check the exit code. A test run that loaded
-  zero tests also "passes".
+- Read the output; do not just check the exit code. A plain ERT run that
+  loaded zero tests also "passes" (`$T test` fails then).
 - Report honestly what was verified and what was not, e.g. "tested on Emacs
   30.1 only".
