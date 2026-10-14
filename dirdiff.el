@@ -563,7 +563,8 @@ Changed directories are not; their contents are."
          (text (concat (make-string (* 2 depth) ?\s)
                        (propertize (concat indicator (dirdiff-node-name node) suffix)
                                    'face (dirdiff--face node side)))))
-    (truncate-string-to-width text dirdiff--width nil ?\s "…")))
+    (propertize (truncate-string-to-width text dirdiff--width nil ?\s "…")
+                'dirdiff-side side)))
 
 (defun dirdiff--row (node depth)
   (propertize (concat (dirdiff--cell node 'left depth)
@@ -654,32 +655,29 @@ Changed directories are not; their contents are."
     (dirdiff--place)
     (dirdiff--update-mode-line)))
 
-(defun dirdiff--cell-start (side)
-  (if (eq side 'right) (+ dirdiff--width 3) 0))
-
-(defun dirdiff--place (&optional from-column)
-  "Move point to the active cell of the current row and highlight it.
-With FROM-COLUMN, first make the side point is on the active side."
+(defun dirdiff--place ()
+  "Move point to the active cell of the current row and highlight it."
   (when (and (eobp) (bolp) (not (bobp)))
     (forward-line -1))
-  (let* ((bol (pos-bol))
-         (eol (pos-eol)))
-    (when from-column
-      (setq dirdiff--side (if (>= (- (point) bol) (+ dirdiff--width 2)) 'right 'left)))
-    (let* ((start (min eol (+ bol (dirdiff--cell-start dirdiff--side))))
-           (end (min eol (+ start dirdiff--width))))
-      (goto-char start)
-      (unless (overlayp dirdiff--cell-overlay)
-        (setq dirdiff--cell-overlay (make-overlay 1 1))
-        (overlay-put dirdiff--cell-overlay 'face 'dirdiff-active-cell)
-        (overlay-put dirdiff--cell-overlay 'priority 10))
-      (if (< start end)
-          (move-overlay dirdiff--cell-overlay start end)
-        (delete-overlay dirdiff--cell-overlay)))))
+  (let* ((eol (pos-eol))
+         (start (or (text-property-any (pos-bol) eol 'dirdiff-side dirdiff--side)
+                    (pos-bol)))
+         (end (next-single-property-change start 'dirdiff-side nil eol)))
+    (goto-char start)
+    (unless (overlayp dirdiff--cell-overlay)
+      (setq dirdiff--cell-overlay (make-overlay 1 1))
+      (overlay-put dirdiff--cell-overlay 'face 'dirdiff-active-cell)
+      (overlay-put dirdiff--cell-overlay 'priority 10))
+    (move-overlay dirdiff--cell-overlay start end)))
 
 (defun dirdiff--post-command ()
   (when dirdiff--session
-    (dirdiff--place t)))
+    (dirdiff--place)))
+
+(defun dirdiff--set-side (side)
+  (setq dirdiff--side side)
+  (dirdiff--place)
+  (force-mode-line-update))
 
 (defun dirdiff--window-size-change (window)
   (with-current-buffer (window-buffer window)
@@ -707,21 +705,23 @@ With FROM-COLUMN, first make the side point is on the active side."
 (defun dirdiff-switch-side ()
   "Make the other side active."
   (interactive)
-  (setq dirdiff--side (dirdiff--other-side dirdiff--side))
-  (dirdiff--place)
-  (force-mode-line-update))
+  (dirdiff--set-side (dirdiff--other-side dirdiff--side)))
 
 (defun dirdiff-select-left ()
   "Make the left side active."
   (interactive)
-  (setq dirdiff--side 'left)
-  (dirdiff--place))
+  (dirdiff--set-side 'left))
 
 (defun dirdiff-select-right ()
   "Make the right side active."
   (interactive)
-  (setq dirdiff--side 'right)
-  (dirdiff--place))
+  (dirdiff--set-side 'right))
+
+(defun dirdiff-mouse-select (event)
+  "Select the row and side clicked on with EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (dirdiff--set-side (or (get-text-property (point) 'dirdiff-side) dirdiff--side)))
 
 (defun dirdiff-next-line (n)
   "Move N rows down, staying on the active side."
@@ -893,8 +893,7 @@ If the file exists on one side only, visit it."
 (defun dirdiff-mouse-open (event)
   "Open the entry clicked on with EVENT, like `dirdiff-open'."
   (interactive "e")
-  (mouse-set-point event)
-  (dirdiff--place t)
+  (dirdiff-mouse-select event)
   (dirdiff-open))
 
 (defun dirdiff--active-file ()
@@ -1037,6 +1036,7 @@ If the comparison has its own frame, delete it."
   "C-n" #'dirdiff-next-line
   "C-p" #'dirdiff-previous-line
   "RET" #'dirdiff-open
+  "<mouse-1>" #'dirdiff-mouse-select
   "<double-mouse-1>" #'dirdiff-mouse-open
   "<mouse-2>" #'dirdiff-mouse-open
   "SPC" #'dirdiff-toggle

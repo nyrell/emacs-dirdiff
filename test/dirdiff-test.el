@@ -244,6 +244,26 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
       (should (string-prefix-p " |1 <1 >2" dirdiff--mode-line-status)))))
 
+;; Bug: the active side used to be derived from the cursor column after
+;; every command, so moving to the start of the line switched sides.
+(ert-deftest dirdiff-test-side-only-changes-on-request ()
+  (dirdiff-test--with-dirs '(("a" . "1") ("b" . "2")) '(("a" . "x") ("b" . "y"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-switch-side)
+      (should (eq dirdiff--side 'right))
+      (dolist (move (list #'beginning-of-line #'beginning-of-buffer #'end-of-buffer))
+        (funcall move)
+        (dirdiff--post-command)
+        (should (eq dirdiff--side 'right))))))
+
+(ert-deftest dirdiff-test-wide-characters ()
+  (dirdiff-test--with-dirs '(("日本語日本語.txt" . "1")) '(("日本語日本語.txt" . "2"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-switch-side)
+      (should (eq (get-text-property (point) 'dirdiff-side) 'right))
+      ;; The right cell starts after the left column and the gutter.
+      (should (= (current-column) (+ dirdiff--width 3))))))
+
 ;;;; Editing
 
 (defun dirdiff-test--goto (rel)
