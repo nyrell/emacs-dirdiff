@@ -55,17 +55,14 @@ $T -L . test test/mypkg-test.el   # run ERT
 
 ## Use it in a project
 
-Put this in the project's `AGENTS.md` or `CLAUDE.md` (adjust the path):
+This README is the entry point; no other instruction file is needed. Copy the
+folder into the project (or point to it) and tell the agent:
 
-```markdown
-## Emacs Lisp
-Follow emacs-for-agents/README.md. After every edit run
-`emacs-for-agents/tools/elisp-agent -L . check FILE` and fix everything it
-reports before continuing. Run `elisp-agent describe NAME` before using a
-function you have not seen in this code, and `elisp-agent builtins GROUP`
-before writing a helper. Tests: `elisp-agent -L . test test/*-test.el`.
-Never report work as done without passing check and test output.
-```
+> Read emacs-for-agents/README.md and follow it.
+
+Then the agent should run the tool from the project root, with `-L .` so it
+finds the project's own files. Work is done only when `check` and `test` pass,
+and the agent shows their output.
 
 ## Why this exists
 
