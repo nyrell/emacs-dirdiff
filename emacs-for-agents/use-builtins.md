@@ -15,6 +15,13 @@ is in no model's short-term memory. Search before you write.
 | Which library defines a feature? | `elisp-agent eval '(locate-library "seq")'` |
 | How is this done properly (hooks, modes, processes…)? | `elisp-agent info --index elisp TOPIC`, then `elisp-agent info elisp NODE` |
 
+**Not built in:** `s.el`, `dash.el`, `f.el` and `ht.el` are popular
+packages, not part of Emacs. Code that calls `s-trim`, `-map` or `f-join`
+needs that package installed and listed in `Package-Requires`. Use
+`string-trim`, `seq-map`/`mapcar` and `file-name-concat` instead. Models
+often present these libraries as built-in; `describe` in a clean Emacs
+settles it ("NOT DEFINED").
+
 Rule of thumb: if a helper takes less than three lines and sounds generic
 ("join paths", "trim a string", "unique elements"), it almost certainly
 exists.

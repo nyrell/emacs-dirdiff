@@ -29,22 +29,16 @@ use another Emacs binary.
 1. **Structure.** Finds missing and extra parentheses and says where, in words:
 
    ```
-   f.el:2: missing 1 closing paren(s) in the form starting at line 2: (defun my-a ... (line 7 starts a new top-level form inside it)
-   f.el:4: extra closing paren; the form starting at line 2 has one ) too many: (defun my-a
-   f.el:7: missing closing paren(s): this form is not closed before the end of the file: (defun my-b
-   ```
-
-   Parentheses inside strings, comments and `?\(` are understood. Each
-   error comes with a **hint from the indentation**: models indent by
-   intention more reliably than they count parentheses (the idea behind
-   [parenmedic][pm] and [Parinfer][pi]), so the first line whose written
-   indentation disagrees with the parens is usually just after the mistake:
-
-   ```
    f.el:1: missing 1 closing paren(s) in the form starting at line 1: (defun a ... (line 7 starts a new top-level form inside it) Hint: line 3 is indented 4, but the parens put it at 8, so a ) is probably missing at the end of the code before line 3.
+   g.el:3: extra closing paren; an earlier form was closed too early, so the indented form at line 3 ended up at top level: (bar Hint: line 3 is indented 2, but the parens put it at 0, so there is probably a ) too many before line 3.
+   h.el:1: missing closing paren(s): this form is not closed before the end of the file: (defun a Hint: the indentation agrees with the parens, so the ) is probably missing at the end of line 5.
    ```
 
-   The hint is only as good as the indentation, so keep it right.
+   Parentheses inside strings, comments and `?\(` are understood. The
+   **hint comes from the indentation**: models indent by intention more
+   reliably than they count parentheses (the idea behind [parenmedic][pm]
+   and [Parinfer][pi]), so the first line whose written indentation
+   disagrees with the parens is usually just after the mistake. The hint is only as good as the indentation, so keep it right.
 2. **Byte-compile** (only if the structure is fine). Shows the compiler's
    warnings: unknown functions, wrong number of arguments, free variables,
    unused values. **Warnings fail the check** unless `--allow-warnings`.

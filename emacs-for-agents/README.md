@@ -93,6 +93,10 @@ the source of several ideas here:
 - [xenodium/emacs-skills](https://github.com/xenodium/emacs-skills):
   Claude Code skills that drive a live Emacs through `emacsclient`
   (open, select, highlight, describe).
+- [agent-emacs](https://clawhub.ai/pitze/skills/agent-emacs) (OpenClaw):
+  a persistent Emacs daemon as the agent's workspace (buffers as state,
+  TRAMP, Magit). It is about using Emacs, not writing Elisp; as a
+  caution, it calls `s.el` and `dash.el` built-in, which they are not.
 - [ollama-buddy's skills](https://github.com/captainflasmr/ollama-buddy/tree/main/.agents/skills):
   `elisp-dev` (debugging, Edebug, error messages) and `elisp-review` (a
   review checklist: hooks and advice removed, `user-error`, autoloads).

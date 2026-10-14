@@ -68,6 +68,12 @@ session**. Rules:
   `execute-kbd-macro` inside the evaluated form for real key handling.
 - For anything disruptive, start a separate server: `emacs -Q --daemon=test`
   and `emacsclient -s test --eval ...`; stop it with `(kill-emacs)`.
+- **The user may have the file open with unsaved changes.** Before writing
+  a file from outside, check
+  `(when-let* ((b (find-buffer-visiting "/abs/file.el"))) (buffer-modified-p b))`;
+  if it is non-nil, ask instead of writing. After writing, refresh their
+  buffer with `(with-current-buffer b (revert-buffer t t t))` so the
+  buffer and the file agree.
 - Run tests in batch, not here. `ert-run-tests-batch-and-exit` refuses
   outside batch, and tests that do run in a live Emacs leave their state
   behind (definitions, hooks, buffers). Some published skills tell agents
