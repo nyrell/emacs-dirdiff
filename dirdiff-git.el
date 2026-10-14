@@ -42,8 +42,8 @@
 
 (require 'dirdiff)
 
-(declare-function magit-diff-read-range-or-commit "magit-diff")
-(declare-function magit-read-branch-or-commit "magit-git")
+(declare-function magit-diff-read-range-or-commit "ext:magit-diff")
+(declare-function magit-read-branch-or-commit "ext:magit-git")
 (declare-function log-view-current-tag "log-view")
 (defvar log-view-mode-map)
 
