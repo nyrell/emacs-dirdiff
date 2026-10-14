@@ -18,17 +18,19 @@
 ;;
 ;;   M-x dirdiff         two files (ediff) or two directories
 ;;   M-x dirdiff-git     git revisions, like `git difftool -d'
-;;   magit, d D p        range or commit (at a commit: <commit>^..<commit>)
+;;   magit, d D p        commit vs its previous commit (the commit at
+;;                       point; with commits selected, all of them)
 ;;   magit, d D h        revision vs HEAD
 ;;   magit, d D w        revision vs working tree
+;;   magit, d D r        a range, like `git difftool -d RANGE'
 ;;   vc log, D           revision at point vs its parent, or the region
 ;;   Dired, C-c =        the two directories marked in the visible windows
 ;;
 ;; Comparisons started from magit open in a new frame; `q' closes it.
 ;;
-;; If `D p', `D h' or `D w' are already in magit's diff menu (for
-;; example from a magit-difftool.el), they are replaced, whichever file
-;; is loaded first.  To keep them and use other keys for dirdiff, see
+;; If `D p', `D h', `D w' or `D r' are already in magit's diff menu
+;; (for example from a magit-difftool.el), they are replaced, whichever
+;; file is loaded first.  To keep them and use other keys for dirdiff, see
 ;; option 2 in dirdiff-magit-config.el.
 
 ;;; Code:
@@ -44,16 +46,7 @@
 
 (declare-function dirdiff-magit-setup "../dirdiff-git" ())
 (declare-function dirdiff-vc-setup "../dirdiff-git" ())
-(declare-function transient-get-suffix "ext:transient" (prefix loc))
-(declare-function transient-remove-suffix "ext:transient" (prefix loc))
 (defvar dired-mode-map)
-
-(defun my/dirdiff-magit-setup ()
-  "Put the dirdiff commands on \\`D p', \\`D h' and \\`D w' in magit's diff menu."
-  (dolist (key '("D p" "D h" "D w"))
-    (when (ignore-errors (transient-get-suffix 'magit-diff key))
-      (transient-remove-suffix 'magit-diff key)))
-  (dirdiff-magit-setup))
 
 ;; Magit: after the init file, so that keys added by other files loaded
 ;; later in it are replaced too.
@@ -61,7 +54,7 @@
   "Set up the magit keys once magit's diff menu is loaded."
   (with-eval-after-load 'magit-diff
     (require 'dirdiff-git)
-    (my/dirdiff-magit-setup)))
+    (dirdiff-magit-setup)))
 
 (if after-init-time
     (my/dirdiff-magit-setup-later)

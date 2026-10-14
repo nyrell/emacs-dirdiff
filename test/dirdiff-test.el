@@ -544,12 +544,44 @@ With IGNORE-WHITESPACE, ignore whitespace."
     (should (equal (dirdiff-git--parse-range "..B") '("HEAD" "B")))
     (should (equal (dirdiff-git--parse-range "HEAD~1") '("HEAD~1" nil)))
     (should (equal (dirdiff-git--parse-range "") '("HEAD" nil)))
-    (should (equal (dirdiff-git--parse-range "HEAD^!")
-                   (list (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) "HEAD")))
+    (should (equal (dirdiff-git--parse-range "HEAD^!") '("HEAD^" "HEAD")))
     (should (equal (dirdiff-git--parse-range "HEAD~1^!")
                    (list dirdiff-git--empty-tree "HEAD~1")))
     (should (equal (dirdiff-git--parse-range "HEAD~1...HEAD")
                    (list (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) "HEAD")))))
+
+;; Bug: magit's `D p' suggested a range, often a useless one, instead
+;; of comparing a commit with its previous commit.
+(ert-deftest dirdiff-test-git-previous ()
+  (dirdiff-test--with-repo
+    (let ((default-directory repo)
+          compared)
+      (cl-letf (((symbol-function 'dirdiff-git-compare)
+                 (lambda (&rest revs) (setq compared revs)))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _choices &rest args) (nth 4 args))))
+        (call-interactively #'dirdiff-git-previous)
+        (should (equal compared '("HEAD^" "HEAD")))
+        (dirdiff-git-previous "HEAD~1")
+        (should (equal compared (list dirdiff-git--empty-tree "HEAD~1")))
+        (dirdiff-git-previous "HEAD~1" "HEAD")
+        (should (equal compared (list dirdiff-git--empty-tree "HEAD")))))))
+
+(ert-deftest dirdiff-test-magit-setup ()
+  "The keys replace existing suffixes, also when set up twice."
+  (skip-unless (require 'magit-diff nil t))
+  (transient-append-suffix 'magit-diff '(-1 -1 -1) '("D p" "Difftool" ignore))
+  (dirdiff-magit-setup)
+  (dirdiff-magit-setup)
+  (let ((layout (format "%S" (get 'magit-diff 'transient--layout))))
+    (pcase-dolist (`(,key . ,command) '(("D p" . dirdiff-git-previous)
+                                         ("D h" . dirdiff-git-against-head)
+                                         ("D w" . dirdiff-git-against-worktree)
+                                         ("D r" . dirdiff-git)))
+      (should (eq (plist-get (cdr (transient-get-suffix 'magit-diff key)) :command) command))
+      (should (= 1 (with-temp-buffer
+                     (insert layout)
+                     (how-many (regexp-quote (format ":key %S" key)) (point-min))))))))
 
 (provide 'dirdiff-test)
 ;;; dirdiff-test.el ends here

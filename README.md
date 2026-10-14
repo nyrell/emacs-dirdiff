@@ -110,9 +110,13 @@ This adds to magit's diff menu (`d`):
 
 | Key | Action |
 |---|---|
-| `D p` | range or commit (`dirdiff-git`; suggests `<commit>^..<commit>` at a commit) |
-| `D h` | revision against `HEAD` |
-| `D w` | revision against the working tree |
+| `D p` | a commit with its previous commit: the commit at point, or the current branch (with commits selected in a log: the changes of all of them) |
+| `D h` | a revision with `HEAD` |
+| `D w` | a revision with the working tree |
+| `D r` | a range, like `git difftool -d RANGE` (`dirdiff-git`) |
+
+Suffixes already on these keys, such as `git difftool` ones, are
+replaced.
 
 Comparisons started from magit open in a new (maximized) frame, so
 magit's windows are left alone; `q` deletes the frame again. See
