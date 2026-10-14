@@ -1,0 +1,56 @@
+#!/bin/sh
+# dirdiff-difftool -- use Emacs dirdiff as the tool for `git difftool --dir-diff'.
+#
+# Setup:
+#   git config --global difftool.dirdiff.cmd 'dirdiff-difftool "$LOCAL" "$REMOTE"'
+#   git config --global difftool.prompt false
+# Use:
+#   git difftool -d --tool=dirdiff [<rev>[..<rev>]]
+#
+# If an Emacs server is running, the comparison opens there and this
+# script waits until it is quit in Emacs (git deletes its temporary
+# directories as soon as the tool exits).  Otherwise a new Emacs is
+# started.
+#
+# Environment:
+#   DIRDIFF_EMACSCLIENT  emacsclient command (default: emacsclient)
+#   DIRDIFF_EMACS        emacs command (default: emacs)
+
+set -eu
+
+if [ $# -ne 2 ]; then
+    echo "usage: $0 LEFT RIGHT" >&2
+    exit 2
+fi
+
+# Directory holding dirdiff.el, used when dirdiff is not installed.
+script=$(readlink -f "$0" 2>/dev/null || echo "$0")
+lisp_dir=$(cd "$(dirname "$script")/.." && pwd)
+
+# Quote a string for Emacs Lisp.
+quote() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')"
+}
+
+left=$(quote "$(cd "$1" && pwd)")
+right=$(quote "$(cd "$2" && pwd)")
+load="(unless (require 'dirdiff nil t) (add-to-list 'load-path $(quote "$lisp_dir")) (require 'dirdiff))"
+client=${DIRDIFF_EMACSCLIENT:-emacsclient}
+
+if $client -a false -e t >/dev/null 2>&1; then
+    done_file=$(mktemp "${TMPDIR:-/tmp}/dirdiff-difftool.XXXXXX")
+    trap 'rm -f "$done_file"' EXIT INT TERM
+    $client -a false -e "(progn $load (dirdiff-difftool $left $right $(quote "$done_file")))" >/dev/null
+    # Emacs deletes the file when the comparison is quit.
+    n=0
+    while [ -e "$done_file" ]; do
+        sleep 0.5
+        n=$((n + 1))
+        # Stop waiting if Emacs went away.
+        if [ $((n % 20)) -eq 0 ] && ! $client -a false -e t >/dev/null 2>&1; then
+            break
+        fi
+    done
+else
+    exec ${DIRDIFF_EMACS:-emacs} --eval "(progn $load (dirdiff-difftool $left $right nil t))"
+fi
