@@ -181,8 +181,9 @@ everything except `dirdiff-ignored-names' is included."
   left right                            ; sources
   tree                                  ; root node
   (open (make-hash-table :test #'equal)) ; rel -> t for expanded dirs
-  prepare     ; nil, or a function called with the session before
-              ; comparing, returning nil or a function NODE -> status
+  ;; PREPARE is nil, or a function called with the session before
+  ;; comparing, returning nil or a function NODE -> status.
+  prepare
   cleanup     ; list of functions run when the buffer is killed
   counts      ; (CHANGED LEFT-ONLY RIGHT-ONLY CONFLICTS)
   (ignore-whitespace dirdiff-ignore-whitespace)
@@ -190,23 +191,25 @@ everything except `dirdiff-ignored-names' is included."
   (hide-identical dirdiff-hide-identical))
 
 (defun dirdiff--entry-dir-p (entry)
+  "Non-nil if ENTRY is a directory."
   (and entry (eq (dirdiff-entry-type entry) 'dir)))
 
 (defun dirdiff--node-dir-p (node)
+  "Non-nil if NODE is a directory on either side."
   (or (dirdiff--entry-dir-p (dirdiff-node-left node))
       (dirdiff--entry-dir-p (dirdiff-node-right node))))
 
 (defun dirdiff--node-entry (node side)
+  "Return the entry of NODE on SIDE, `left' or `right'."
   (if (eq side 'left) (dirdiff-node-left node) (dirdiff-node-right node)))
 
 (defun dirdiff--session-source (session side)
+  "Return the source of SESSION on SIDE."
   (if (eq side 'left) (dirdiff-session-left session) (dirdiff-session-right session)))
 
 (defun dirdiff--other-side (side)
+  "Return the side opposite to SIDE."
   (if (eq side 'left) 'right 'left))
-
-(defun dirdiff--join (dir name)
-  (if (string-empty-p dir) name (concat dir "/" name)))
 
 ;;;; Sources
 
@@ -241,13 +244,14 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
                               :mtime (file-attribute-modification-time attrs))))))
 
 (cl-defmethod dirdiff-source-children ((source dirdiff-dir-source) rel)
+  "List directory REL of SOURCE, leaving out ignored or unlisted names."
   (let ((dir (expand-file-name rel (dirdiff-dir-source-root source)))
         (only (dirdiff-dir-source-only source))
         result)
     (when (file-directory-p dir)
       (dolist (f (directory-files-and-attributes
                   dir nil directory-files-no-dot-files-regexp t))
-        (let ((kind (and only (gethash (dirdiff--join rel (car f)) only))))
+        (let ((kind (and only (gethash (file-name-concat rel (car f)) only))))
           (when (if only kind (not (member (car f) dirdiff-ignored-names)))
             (let ((entry (dirdiff--fs-entry (expand-file-name (car f) dir) (cdr f))))
               ;; A directory that git lists as a file is a submodule.
@@ -257,9 +261,11 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
     result))
 
 (cl-defmethod dirdiff-source-file ((_source dirdiff-dir-source) entry _rel)
+  "Return the file of ENTRY itself."
   (dirdiff-entry-file entry))
 
 (cl-defmethod dirdiff-source-copy-to ((_source dirdiff-dir-source) entry _rel dest)
+  "Copy ENTRY's file to DEST, keeping times and permissions."
   (let ((file (dirdiff-entry-file entry)))
     (pcase (dirdiff-entry-type entry)
       ('dir (copy-directory file dest t t nil))
@@ -276,7 +282,7 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
     (buffer-string)))
 
 (defun dirdiff--binary-file-p (file)
-  "Return non-nil if FILE looks binary (has a NUL byte near the start)."
+  "Return non-nil if FILE seems binary (has a NUL byte near the start)."
   (string-search "\0" (dirdiff--read-bytes file 8000)))
 
 (defun dirdiff--equal-p (a b sizes program args normalize)
@@ -290,7 +296,7 @@ PROGRAM with ARGS, if it is available."
     (zerop (apply #'call-process program nil nil nil (append args (list a b))))))
 
 (defun dirdiff--strip-whitespace (string)
-  ;; Like `diff -w': ignore whitespace within lines, but not line breaks.
+  "Remove whitespace within lines from STRING, like `diff -w'."
   (replace-regexp-in-string "[ \t\f\v\r]+" "" string t t))
 
 (defun dirdiff--compare-files (session a b quick)
@@ -323,7 +329,7 @@ byte by byte even if SESSION says to compare them quickly."
 It is what the session's `prepare' function returned.")
 
 (defun dirdiff--compare-entries (session node)
-  "Return the status of NODE, whose sides are both non-directories."
+  "Return the status in SESSION of NODE, whose sides are not directories."
   (let* ((l (dirdiff-node-left node))
          (r (dirdiff-node-right node))
          (lt (dirdiff-entry-type l))
@@ -371,6 +377,7 @@ For a link in a git revision, FILE holds the target as its contents."
           (t 'changed))))
 
 (defun dirdiff--node-status (session node)
+  "Return the status of NODE in SESSION."
   (if (dirdiff--node-dir-p node)
       (dirdiff--dir-status node)
     (cond ((not (dirdiff-node-right node)) 'left)
@@ -386,12 +393,13 @@ For a link in a git revision, FILE holds the target as its contents."
                     da)))))
 
 (defun dirdiff--child-entries (session side node)
+  "Return the entries of directory NODE on SIDE of SESSION, or nil."
   (and (dirdiff--entry-dir-p (dirdiff--node-entry node side))
        (dirdiff-source-children (dirdiff--session-source session side)
                                 (dirdiff-node-rel node))))
 
 (defun dirdiff--build-children (session node)
-  "Compare the contents of directory NODE; return its sorted children."
+  "Compare the contents of directory NODE in SESSION; return its children."
   (let ((right (make-hash-table :test #'equal))
         children)
     (pcase-dolist (`(,name . ,entry) (dirdiff--child-entries session 'right node))
@@ -405,8 +413,10 @@ For a link in a git revision, FILE holds the target as its contents."
     (dirdiff--sort children)))
 
 (defun dirdiff--build-node (session parent name left right)
+  "Make the node NAME under PARENT with entries LEFT and RIGHT.
+Compare it, and its contents if it is a directory, using SESSION."
   (let ((node (dirdiff-node-create :name name :parent parent :left left :right right
-                                   :rel (dirdiff--join (dirdiff-node-rel parent) name))))
+                                   :rel (file-name-concat (dirdiff-node-rel parent) name))))
     (when (and dirdiff--progress (zerop (% (cl-incf dirdiff--progress-count) 50)))
       (progress-reporter-update dirdiff--progress dirdiff--progress-count))
     (when (dirdiff--node-dir-p node)
@@ -434,7 +444,7 @@ For a link in a git revision, FILE holds the target as its contents."
     (dirdiff--count-differences session)))
 
 (defun dirdiff--refresh-node (session node)
-  "Re-compare NODE (after it changed on disk) and update its ancestors."
+  "Compare NODE of SESSION again after it changed; update its ancestors."
   ;; If the parent is missing on a side, an action may have created it,
   ;; so refresh from the topmost such ancestor.
   (while (let ((p (dirdiff-node-parent node)))
@@ -502,15 +512,19 @@ Changed directories are not; their contents are."
 (defvar-local dirdiff--cell-overlay nil)
 
 (defun dirdiff--current-node ()
+  "Return the node on the current line, or nil."
   (get-text-property (pos-bol) 'dirdiff-node))
 
 (defun dirdiff--node-at-point ()
+  "Return the node on the current line, or signal a `user-error'."
   (or (dirdiff--current-node) (user-error "No entry on this line")))
 
 (defun dirdiff--open-p (node)
+  "Non-nil if directory NODE is expanded."
   (gethash (dirdiff-node-rel node) (dirdiff-session-open dirdiff--session)))
 
 (defun dirdiff--set-open (node open)
+  "Expand directory NODE if OPEN is non-nil, else collapse it."
   (puthash (dirdiff-node-rel node) open (dirdiff-session-open dirdiff--session)))
 
 ;;;; Rendering
@@ -531,6 +545,7 @@ Changed directories are not; their contents are."
     (nreverse rows)))
 
 (defun dirdiff--face (node side)
+  "Return the face for NODE's cell on SIDE."
   (if (not (dirdiff--node-entry node side))
       'dirdiff-absent
     (pcase (dirdiff-node-status node)
@@ -549,7 +564,7 @@ Changed directories are not; their contents are."
     ('conflict (propertize "!" 'face 'dirdiff-conflict))))
 
 (defun dirdiff--cell (node side depth)
-  "Return the text of NODE's cell on SIDE, padded to the column width."
+  "Return the text of NODE's cell on SIDE at DEPTH, padded to the column width."
   (let* ((entry (dirdiff--node-entry node side))
          (type (and entry (dirdiff-entry-type entry)))
          (dir (and (dirdiff--node-dir-p node) (memq type '(nil dir))))
@@ -564,6 +579,7 @@ Changed directories are not; their contents are."
                 'dirdiff-side side)))
 
 (defun dirdiff--row (node depth)
+  "Return the line of text for NODE at DEPTH."
   (propertize (concat (dirdiff--cell node 'left depth)
                       " " (dirdiff--marker node) " "
                       (dirdiff--cell node 'right depth)
@@ -584,6 +600,7 @@ Changed directories are not; their contents are."
                2))))
 
 (defun dirdiff--header-line ()
+  "Return the header line: the labels of both sides."
   (when dirdiff--session
     (cl-flet ((cell (side)
                 (let ((source (dirdiff--session-source dirdiff--session side)))
@@ -598,6 +615,7 @@ Changed directories are not; their contents are."
       (concat (cell 'left) "   " (cell 'right)))))
 
 (defun dirdiff--mode-line ()
+  "Return the mode line summary of differences and options."
   (let ((s dirdiff--session))
     (when s
       (pcase-let ((`(,changed ,left ,right ,conflict) (dirdiff-session-counts s)))
@@ -654,10 +672,12 @@ Changed directories are not; their contents are."
     (move-overlay dirdiff--cell-overlay start end)))
 
 (defun dirdiff--post-command ()
+  "Keep point and the highlight on the active cell."
   (when dirdiff--session
     (dirdiff--place)))
 
 (defun dirdiff--window-size-change (window)
+  "Redraw the buffer in WINDOW if its column width changed."
   (with-current-buffer (window-buffer window)
     (when (and dirdiff--session (/= dirdiff--width (dirdiff--column-width)))
       (dirdiff--render))))
@@ -677,6 +697,7 @@ Changed directories are not; their contents are."
 ;;;; Commands: moving around
 
 (defun dirdiff--set-side (side)
+  "Make SIDE the active side."
   (setq dirdiff--side side)
   (dirdiff--place)
   (force-mode-line-update))
@@ -725,6 +746,7 @@ With BACKWARD, move to the previous one."
 ;;;; Commands: what is shown
 
 (defun dirdiff--set-open-all (pred)
+  "Expand the directories for which PRED is non-nil, collapse the rest."
   (dirdiff--walk (dirdiff-session-tree dirdiff--session)
                  (lambda (node)
                    (when (dirdiff--node-dir-p node)
@@ -742,6 +764,7 @@ With BACKWARD, move to the previous one."
   (dirdiff--set-open-all #'ignore))
 
 (defun dirdiff--changed-dir-p (node)
+  "Non-nil if NODE has the status `changed'."
   (eq (dirdiff-node-status node) 'changed))
 
 (defun dirdiff-expand-changed ()
@@ -777,11 +800,13 @@ With BACKWARD, move to the previous one."
 ;;;; Commands: opening files
 
 (defun dirdiff--local-file (node side)
+  "Return a local file with NODE's contents on SIDE, or nil if absent."
   (when-let* ((entry (dirdiff--node-entry node side)))
     (dirdiff-source-file (dirdiff--session-source dirdiff--session side)
                          entry (dirdiff-node-rel node))))
 
 (defun dirdiff--ediff (node)
+  "Run ediff on the files of NODE; compare NODE again when ediff quits."
   (require 'ediff)
   (let* ((left (dirdiff--local-file node 'left))
          (right (dirdiff--local-file node 'right))
@@ -875,6 +900,8 @@ If it only exists on the other side, visit that."
     (expand-file-name (dirdiff-node-rel node) (dirdiff-dir-source-root source))))
 
 (defun dirdiff--delete-local (file)
+  "Delete FILE, or directory FILE with its contents.
+Respects `delete-by-moving-to-trash'."
   (if (and (file-directory-p file) (not (file-symlink-p file)))
       (delete-directory file t t)
     (delete-file file t)))
@@ -920,12 +947,12 @@ EXISTING is what is there now.  Replacing something asks with
                            (abbreviate-file-name (file-truename dest))
                            (dirdiff--other-side to))))
      (t
-      (yes-or-no-p (format "Replace %s on the %s side?  The current %s will be %s. "
-                           name to
+      (yes-or-no-p (format "The current %s will be %s.  Replace %s on the %s side? "
                            (if (dirdiff--entry-dir-p existing) "directory" "file")
                            (if delete-by-moving-to-trash
                                "moved to the trash"
-                             "deleted permanently")))))))
+                             "deleted permanently")
+                           name to))))))
 
 (defun dirdiff-copy-to-right ()
   "Copy the current file or directory from the left side to the right side."
@@ -1116,6 +1143,7 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
 ;;;; Entry points
 
 (defun dirdiff--dired-marked-p ()
+  "Non-nil if the current Dired buffer has marked files."
   (save-excursion
     (goto-char (point-min))
     (re-search-forward (dired-marker-regexp) nil t)))
@@ -1136,6 +1164,7 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
         (list a b)))))
 
 (defun dirdiff--dir-source (dir &optional writable)
+  "Return a directory source for DIR; WRITABLE as in `dirdiff-source'."
   (dirdiff-dir-source-create :root (file-name-as-directory (expand-file-name dir))
                              :label (abbreviate-file-name dir)
                              :writable writable))

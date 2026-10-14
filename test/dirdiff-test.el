@@ -156,7 +156,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
 
 (ert-deftest dirdiff-test-ignored-names ()
   (dirdiff-test--with-dirs '((".git/HEAD" . "a") ("CVS/x" . "x") ("f" . "f"))
-                           '((".git/HEAD" . "b") ("f" . "f"))
+      '((".git/HEAD" . "b") ("f" . "f"))
     (should (equal (dirdiff-test--statuses (dirdiff-test--session left right))
                    '(("f" . same))))
     (let ((dirdiff-ignored-names nil))
@@ -336,8 +336,8 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
           (dirdiff-test--goto "g")
           (dirdiff-copy-to-right))
         (should (equal (nreverse prompts)
-                       '("Replace f on the right side?  The current file will be moved to the trash. "
-                         "Replace f on the right side?  The current file will be deleted permanently. "
+                       '("The current file will be moved to the trash.  Replace f on the right side? "
+                         "The current file will be deleted permanently.  Replace f on the right side? "
                          "Copy g to the right side? ")))
         ;; Declined, so nothing changed.
         (should (equal (dirdiff-test--read (expand-file-name "f" right)) "old"))

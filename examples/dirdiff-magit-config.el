@@ -51,9 +51,9 @@
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D d" "Dirdiff range or commit" dirdiff-git))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D h" "Dirdiff against HEAD" dirdiff-git--against-head))
+;;     '("D h" "Dirdiff against HEAD" dirdiff-git-against-head))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D w" "Dirdiff against working tree" dirdiff-git--against-worktree))
+;;     '("D w" "Dirdiff against working tree" dirdiff-git-against-worktree))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D s" "Dirdiff HEAD vs working tree" my/dirdiff-head-vs-worktree)))
 

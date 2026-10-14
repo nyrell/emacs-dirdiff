@@ -69,7 +69,7 @@
           (let* ((coding-system-for-read 'utf-8)
                  (status (apply #'process-file "git" nil (list t stderr) nil args)))
             (unless (eql status 0)
-              (error "git %s failed: %s" (string-join args " ")
+              (error "Running git %s failed: %s" (string-join args " ")
                      (string-trim (with-temp-buffer
                                     (insert-file-contents stderr)
                                     (buffer-string)))))
@@ -87,10 +87,11 @@
     (with-temp-buffer
       (set-buffer-multibyte nil)
       (unless (eql 0 (process-file "git" nil t nil "cat-file" "blob" id))
-        (error "git cat-file blob %s failed" id))
+        (error "Reading git blob %s failed" id))
       (buffer-string))))
 
 (defun dirdiff-git--write-blob (repo id file)
+  "Write blob ID of REPO to FILE."
   (let ((contents (dirdiff-git--blob repo id))
         (coding-system-for-write 'no-conversion))
     (with-temp-file file
@@ -98,6 +99,7 @@
       (insert contents))))
 
 (defun dirdiff-git--toplevel (&optional directory)
+  "Return the top directory of the git repository containing DIRECTORY."
   (let ((default-directory (or directory default-directory)))
     (file-name-as-directory
      (expand-file-name
@@ -143,19 +145,21 @@
               (let ((name (pop parts)))
                 (unless (gethash name (gethash dir table))
                   (puthash name (dirdiff-entry-create :type 'dir) (gethash dir table)))
-                (setq dir (dirdiff--join dir name))
+                (setq dir (file-name-concat dir name))
                 (unless (gethash dir table)
                   (puthash dir (make-hash-table :test #'equal) table))))
             (puthash (car parts) entry (gethash dir table)))))
       (setf (dirdiff-git-source-table source) table))))
 
 (cl-defmethod dirdiff-source-children ((source dirdiff-git-source) rel)
+  "List directory REL of revision SOURCE."
   (let (result)
     (when-let* ((entries (gethash rel (dirdiff-git-source-table source))))
       (maphash (lambda (name entry) (push (cons name entry) result)) entries))
     result))
 
 (cl-defmethod dirdiff-source-file ((source dirdiff-git-source) entry rel)
+  "Extract ENTRY at REL of SOURCE to a read-only temporary file."
   (let ((file (expand-file-name
                rel (with-memoization (dirdiff-git-source-tmpdir source)
                      (make-temp-file (format "dirdiff-%s-"
@@ -168,12 +172,13 @@
     file))
 
 (cl-defmethod dirdiff-source-copy-to ((source dirdiff-git-source) entry rel dest)
+  "Write ENTRY at REL of revision SOURCE to DEST, recursively."
   (let ((repo (dirdiff-git-source-repo source)))
     (pcase (dirdiff-entry-type entry)
       ('dir
        (make-directory dest t)
        (pcase-dolist (`(,name . ,child) (dirdiff-source-children source rel))
-         (dirdiff-source-copy-to source child (dirdiff--join rel name)
+         (dirdiff-source-copy-to source child (file-name-concat rel name)
                                  (expand-file-name name dest))))
       ('link
        (make-symbolic-link (decode-coding-string
@@ -261,6 +266,7 @@ With IGNORE-WHITESPACE, leave out files whose changes are all whitespace."
 ;;;; Entry points
 
 (defun dirdiff-git--source (repo rev)
+  "Return a source for revision REV of REPO."
   (let ((id (dirdiff-git--resolve repo rev)))
     (dirdiff-git-source-create
      :repo repo :rev id :writable nil
@@ -269,7 +275,8 @@ With IGNORE-WHITESPACE, leave out files whose changes are all whitespace."
                   (t (format "%s (%s)" rev (substring id 0 7)))))))
 
 (defun dirdiff-git--session (repo left-rev right-rev)
-  "Return a session comparing LEFT-REV with RIGHT-REV (nil: working tree)."
+  "Return a session comparing LEFT-REV with RIGHT-REV in REPO.
+RIGHT-REV nil means the working tree."
   (let ((left (dirdiff-git--source repo left-rev))
         (right (if right-rev
                    (dirdiff-git--source repo right-rev)
@@ -321,6 +328,7 @@ the working tree (RIGHT-REV nil), and empty means HEAD."
        (t (list (or-head range) nil))))))
 
 (defun dirdiff-git--read-rev (prompt)
+  "Read a revision with PROMPT, with magit's reader if available."
   (if (fboundp 'magit-read-branch-or-commit)
       (magit-read-branch-or-commit prompt)
     (completing-read (format-prompt prompt "HEAD")
@@ -346,12 +354,14 @@ working tree."
 
 ;;;; Magit and vc integration
 
-(defun dirdiff-git--against-head (rev)
+;;;###autoload
+(defun dirdiff-git-against-head (rev)
   "Compare REV with HEAD."
   (interactive (list (dirdiff-git--read-rev "Compare with HEAD")))
   (dirdiff-git-compare rev "HEAD"))
 
-(defun dirdiff-git--against-worktree (rev)
+;;;###autoload
+(defun dirdiff-git-against-worktree (rev)
   "Compare REV with the working tree."
   (interactive (list (dirdiff-git--read-rev "Compare with working tree")))
   (dirdiff-git-compare rev nil))
@@ -360,14 +370,15 @@ working tree."
 (defun dirdiff-magit-setup ()
   "Add dirdiff commands to magit's diff menu (\\`d' in magit buffers).
 They are bound to \\`D p' (range or commit), \\`D h' (against HEAD)
-and \\`D w' (against the working tree)."
-  (with-eval-after-load 'magit-diff
-    (transient-append-suffix 'magit-diff '(-1 -1 -1)
-      '("D p" "Dirdiff range or commit" dirdiff-git))
-    (transient-append-suffix 'magit-diff '(-1 -1 -1)
-      '("D h" "Dirdiff against HEAD" dirdiff-git--against-head))
-    (transient-append-suffix 'magit-diff '(-1 -1 -1)
-      '("D w" "Dirdiff against working tree" dirdiff-git--against-worktree))))
+and \\`D w' (against the working tree).  This loads magit, so call
+it from `with-eval-after-load' in your init file."
+  (require 'magit-diff)
+  (transient-append-suffix 'magit-diff '(-1 -1 -1)
+    '("D p" "Dirdiff range or commit" dirdiff-git))
+  (transient-append-suffix 'magit-diff '(-1 -1 -1)
+    '("D h" "Dirdiff against HEAD" dirdiff-git-against-head))
+  (transient-append-suffix 'magit-diff '(-1 -1 -1)
+    '("D w" "Dirdiff against working tree" dirdiff-git-against-worktree)))
 
 ;;;###autoload
 (defun dirdiff-git-log-view ()
@@ -387,9 +398,11 @@ it; otherwise compare the revision at point with its parent."
 
 ;;;###autoload
 (defun dirdiff-vc-setup ()
-  "Bind \\`D' in vc log buffers to `dirdiff-git-log-view'."
-  (with-eval-after-load 'log-view
-    (keymap-set log-view-mode-map "D" #'dirdiff-git-log-view)))
+  "Bind \\`D' in vc log buffers to `dirdiff-git-log-view'.
+This loads log-view, so call it from `with-eval-after-load' in your
+init file."
+  (require 'log-view)
+  (keymap-set log-view-mode-map "D" #'dirdiff-git-log-view))
 
 (provide 'dirdiff-git)
 ;;; dirdiff-git.el ends here
