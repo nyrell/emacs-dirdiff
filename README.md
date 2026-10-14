@@ -26,7 +26,8 @@ optional.
 ```
 
 The middle column shows `|` changed, `<` left only, `>` right only and `!`
-for a file on one side and a directory on the other.
+for a file on one side and a directory on the other. The name of an
+entry that is missing on one side is shown struck through on that side.
 
 ## Installation
 
@@ -62,7 +63,7 @@ it.
 | Key | Action |
 |---|---|
 | `TAB`, click | switch active side |
-| `RET`, double-click | ediff the file pair / expand or collapse the directory / visit a one-sided file |
+| `RET`, double-click | ediff the file pair / expand or collapse the directory / visit a one-sided file in a new frame |
 | `n`, `p` | next / previous difference (expands directories as needed) |
 | `^` | parent directory |
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
@@ -110,10 +111,9 @@ This adds to magit's diff menu (`d`):
 
 | Key | Action |
 |---|---|
-| `D p` | a commit with its previous commit: the commit at point, or the current branch (with commits selected in a log: the changes of all of them) |
-| `D h` | a revision with `HEAD` |
-| `D w` | a revision with the working tree |
-| `D r` | a range, like `git difftool -d RANGE` (`dirdiff-git`) |
+| `D p` | a range, like `git difftool -d RANGE`; at a commit it suggests `<commit>^..<commit>`, the commit with its previous one; commits selected in a log give `A..B`, with a prefix argument `A...B` |
+| `D h` | a revision with `HEAD` (`git difftool -d REV..HEAD`) |
+| `D w` | a revision with the working tree (`git difftool -d REV`) |
 
 Suffixes already on these keys, such as `git difftool` ones, are
 replaced.
@@ -168,6 +168,8 @@ on; use `M-x dirdiff-git` for that.
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
 - `dirdiff-new-frame` — `magit` (default: new frame when started from
   magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`
+- `dirdiff-visit-in-new-frame` — `t` (default) visits a file that exists
+  on one side only in a new frame, `nil` in another window
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
   `dirdiff-conflict`, `dirdiff-active-cell`
 

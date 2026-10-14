@@ -34,7 +34,6 @@
 ;;
 ;;   M-x dirdiff-git                    like `git difftool -d RANGE':
 ;;                                      A..B, A...B, C^! or A
-;;   M-x dirdiff-git-previous           a commit vs its parent
 ;;   M-x dirdiff-git-against-head       a revision vs HEAD
 ;;   M-x dirdiff-git-against-worktree   a revision vs the working tree
 ;;
@@ -47,7 +46,6 @@
 
 (declare-function magit-diff-read-range-or-commit "ext:magit-diff")
 (declare-function magit-read-branch-or-commit "ext:magit-git")
-(declare-function magit-region-values "ext:magit-section")
 (declare-function log-view-current-tag "log-view")
 (defvar log-view-mode-map)
 
@@ -354,61 +352,44 @@ The default is the branch or commit at point, else the current branch."
 RANGE is \"A..B\" (A with B), \"A...B\" (the merge base of A and B
 with B), \"C^!\" (commit C with its parent) or a single revision
 \(compared with the working tree).  Empty compares HEAD with the
-working tree."
+working tree.
+
+With magit, the range is read like magit's \\`d r': it suggests
+\"C^..C\" for the commit C at point, and commits selected in a log
+are used as \"A..B\" (\"A...B\" with a prefix argument)."
   (interactive
    (list (if (fboundp 'magit-diff-read-range-or-commit)
-             (magit-diff-read-range-or-commit "Dirdiff range or commit")
+             (magit-diff-read-range-or-commit "Dirdiff range" nil current-prefix-arg)
            (read-string "Dirdiff range or revision (empty: HEAD vs working tree): "))))
   (apply #'dirdiff-git-compare (dirdiff-git--parse-range range)))
 
 ;;;; Magit and vc integration
 
-(defun dirdiff-git--selected-commits ()
-  "Return (OLDEST . NEWEST) of the commits selected in a magit log, or nil."
-  (when-let* (((fboundp 'magit-region-values))
-              (commits (magit-region-values 'commit t)))
-    (deactivate-mark)
-    (cons (car (last commits)) (car commits))))
-
-;;;###autoload
-(defun dirdiff-git-previous (commit &optional newest)
-  "Compare COMMIT with its parent, like `git difftool -d COMMIT^!'.
-With NEWEST, compare the parent of COMMIT with NEWEST instead, which
-shows the changes of all commits from COMMIT to NEWEST.
-Interactively, these are the oldest and newest commits selected in a
-magit log; without a selection, COMMIT is read, defaulting to the
-commit at point or the current branch."
-  (interactive
-   (if-let* ((selected (dirdiff-git--selected-commits)))
-       (list (car selected) (cdr selected))
-     (list (dirdiff-git--read-rev "Compare with its parent"))))
-  (dirdiff-git-compare (dirdiff-git--parent commit) (or newest commit)))
-
 ;;;###autoload
 (defun dirdiff-git-against-head (rev)
-  "Compare REV with HEAD."
+  "Compare REV with HEAD, like `git difftool -d REV..HEAD'."
   (interactive (list (dirdiff-git--read-rev "Compare with HEAD")))
   (dirdiff-git-compare rev "HEAD"))
 
 ;;;###autoload
 (defun dirdiff-git-against-worktree (rev)
-  "Compare REV with the working tree."
+  "Compare REV with the working tree, like `git difftool -d REV'."
   (interactive (list (dirdiff-git--read-rev "Compare with working tree")))
   (dirdiff-git-compare rev nil))
 
 ;;;###autoload
 (defun dirdiff-magit-setup ()
   "Add dirdiff commands to magit's diff menu (\\`d' in magit buffers).
-\\`D p' compares a commit with its previous one, \\`D h' a revision
-with HEAD, \\`D w' a revision with the working tree, and \\`D r' a
-range.  Suffixes already on these keys are replaced.  This loads
-magit, so call it from `with-eval-after-load' in your init file."
+\\`D p' compares a range (suggesting the commit at point with its
+previous one), \\`D h' a revision with HEAD and \\`D w' a revision
+with the working tree.  Suffixes already on these keys are replaced.
+This loads magit, so call it from `with-eval-after-load' in your init
+file."
   (require 'magit-diff)
   (pcase-dolist (`(,key ,description ,command)
-                 '(("D p" "Dirdiff with previous" dirdiff-git-previous)
+                 '(("D p" "Dirdiff with previous" dirdiff-git)
                    ("D h" "Dirdiff with HEAD" dirdiff-git-against-head)
-                   ("D w" "Dirdiff with working tree" dirdiff-git-against-worktree)
-                   ("D r" "Dirdiff range" dirdiff-git)))
+                   ("D w" "Dirdiff with working tree" dirdiff-git-against-worktree)))
     (while (ignore-errors (transient-get-suffix 'magit-diff key))
       (transient-remove-suffix 'magit-diff key))
     (transient-append-suffix 'magit-diff '(-1 -1 -1)

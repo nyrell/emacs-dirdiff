@@ -18,19 +18,17 @@
 ;;
 ;;   M-x dirdiff         two files (ediff) or two directories
 ;;   M-x dirdiff-git     git revisions, like `git difftool -d'
-;;   magit, d D p        commit vs its previous commit (the commit at
-;;                       point; with commits selected, all of them)
+;;   magit, d D p        a range (at a commit: <commit>^..<commit>)
 ;;   magit, d D h        revision vs HEAD
 ;;   magit, d D w        revision vs working tree
-;;   magit, d D r        a range, like `git difftool -d RANGE'
 ;;   vc log, D           revision at point vs its parent, or the region
 ;;   Dired, C-c =        the two directories marked in the visible windows
 ;;
 ;; Comparisons started from magit open in a new frame; `q' closes it.
 ;;
-;; If `D p', `D h', `D w' or `D r' are already in magit's diff menu
-;; (for example from a magit-difftool.el), they are replaced, whichever
-;; file is loaded first.  To keep them and use other keys for dirdiff, see
+;; If `D p', `D h' or `D w' are already in magit's diff menu (for
+;; example from a magit-difftool.el), they are replaced, whichever file
+;; is loaded first.  To keep them and use other keys for dirdiff, see
 ;; option 2 in dirdiff-magit-config.el.
 
 ;;; Code:
@@ -71,6 +69,7 @@
 
 ;; Options; the values shown are the defaults.
 ;; (setq dirdiff-new-frame 'magit)          ; t: always a new frame, nil: never
+;; (setq dirdiff-visit-in-new-frame t)      ; one-sided files; nil: other window
 ;; (setq dirdiff-frame-parameters '((fullscreen . maximized))) ; nil: normal size
 ;; (setq dirdiff-hide-identical nil)        ; directories; git always starts hidden
 ;; (setq dirdiff-ignore-whitespace nil)

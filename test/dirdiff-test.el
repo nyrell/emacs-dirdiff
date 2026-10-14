@@ -371,6 +371,27 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
     messages))
 
 ;; Bug: RET on two symlinks to directories ran ediff on directories.
+;; Requests: a file on one side only is visited in its own frame (an
+;; option), and its missing side is struck through.
+(ert-deftest dirdiff-test-one-sided-file ()
+  (dirdiff-test--with-dirs '(("only" . "x")) '()
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-test--goto "only")
+      (beginning-of-line)
+      (should (eq (get-text-property (1- (search-forward "only")) 'face) 'dirdiff-new))
+      (should (eq (get-text-property (1- (search-forward "only")) 'face) 'dirdiff-absent))
+      (should (face-attribute 'dirdiff-absent :strike-through))
+      (let (visited)
+        (cl-letf (((symbol-function 'find-file-other-frame)
+                   (lambda (f) (push (cons 'frame f) visited)))
+                  ((symbol-function 'find-file-other-window)
+                   (lambda (f) (push (cons 'window f) visited))))
+          (dirdiff-open)
+          (let ((dirdiff-visit-in-new-frame nil))
+            (dirdiff-open)))
+        (should (equal visited `((window . ,(expand-file-name "only" left))
+                                 (frame . ,(expand-file-name "only" left)))))))))
+
 (ert-deftest dirdiff-test-open-links ()
   (dirdiff-test--with-dirs '(("d/x" . "x") ("l" link . "d")) '(("e/x" . "x") ("l" link . "e"))
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
@@ -550,22 +571,20 @@ With IGNORE-WHITESPACE, ignore whitespace."
     (should (equal (dirdiff-git--parse-range "HEAD~1...HEAD")
                    (list (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) "HEAD")))))
 
-;; Bug: magit's `D p' suggested a range, often a useless one, instead
-;; of comparing a commit with its previous commit.
-(ert-deftest dirdiff-test-git-previous ()
+;; Bug: `D p' did not read a range the way the user's difftool keys
+;; did (magit's reader, with `...' on a prefix argument).
+(ert-deftest dirdiff-test-git-range-reader ()
   (dirdiff-test--with-repo
     (let ((default-directory repo)
-          compared)
-      (cl-letf (((symbol-function 'dirdiff-git-compare)
-                 (lambda (&rest revs) (setq compared revs)))
-                ((symbol-function 'completing-read)
-                 (lambda (_prompt _choices &rest args) (nth 4 args))))
-        (call-interactively #'dirdiff-git-previous)
-        (should (equal compared '("HEAD^" "HEAD")))
-        (dirdiff-git-previous "HEAD~1")
-        (should (equal compared (list dirdiff-git--empty-tree "HEAD~1")))
-        (dirdiff-git-previous "HEAD~1" "HEAD")
-        (should (equal compared (list dirdiff-git--empty-tree "HEAD")))))))
+          read compared)
+      (cl-letf (((symbol-function 'magit-diff-read-range-or-commit)
+                 (lambda (&rest args) (setq read args) "HEAD~1..HEAD"))
+                ((symbol-function 'dirdiff-git-compare)
+                 (lambda (&rest revs) (setq compared revs))))
+        (let ((current-prefix-arg '(4)))
+          (call-interactively #'dirdiff-git))
+        (should (equal read '("Dirdiff range" nil (4))))
+        (should (equal compared '("HEAD~1" "HEAD")))))))
 
 (ert-deftest dirdiff-test-magit-setup ()
   "The keys replace existing suffixes, also when set up twice."
@@ -574,10 +593,10 @@ With IGNORE-WHITESPACE, ignore whitespace."
   (dirdiff-magit-setup)
   (dirdiff-magit-setup)
   (let ((layout (format "%S" (get 'magit-diff 'transient--layout))))
-    (pcase-dolist (`(,key . ,command) '(("D p" . dirdiff-git-previous)
-                                         ("D h" . dirdiff-git-against-head)
-                                         ("D w" . dirdiff-git-against-worktree)
-                                         ("D r" . dirdiff-git)))
+    (should-not (string-search ":key \"D r\"" layout))
+    (pcase-dolist (`(,key . ,command) '(("D p" . dirdiff-git)
+                                        ("D h" . dirdiff-git-against-head)
+                                        ("D w" . dirdiff-git-against-worktree)))
       (should (eq (plist-get (cdr (transient-get-suffix 'magit-diff key)) :command) command))
       (should (= 1 (with-temp-buffer
                      (insert layout)

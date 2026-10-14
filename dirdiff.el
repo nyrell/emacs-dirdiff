@@ -109,6 +109,13 @@ buffer, which leaves magit's windows as they were.  Quitting with
                  (const :tag "New frame" t)
                  (const :tag "New frame when started from magit" magit)))
 
+(defcustom dirdiff-visit-in-new-frame t
+  "Whether \\<dirdiff-mode-map>\\[dirdiff-open] visits a one-sided file in a new frame.
+A file that exists on one side only cannot be diffed, so it is
+visited instead: in a new frame if this is non-nil, otherwise in
+another window."
+  :type 'boolean)
+
 (defcustom dirdiff-frame-parameters '((fullscreen . maximized))
   "Frame parameters for the frames made according to `dirdiff-new-frame'."
   :type '(alist :key-type symbol :value-type sexp))
@@ -130,8 +137,8 @@ buffer, which leaves magit's windows as they were.  Quitting with
 (defface dirdiff-conflict '((t :inherit diff-indicator-removed :weight bold))
   "Face for entries that are a file on one side and a directory on the other.")
 
-(defface dirdiff-absent '((t :inherit shadow :slant italic))
-  "Face for the placeholder of an entry missing on this side.")
+(defface dirdiff-absent '((t :inherit shadow :strike-through t))
+  "Face for the name of an entry that does not exist on this side.")
 
 (defface dirdiff-active-cell '((t :inherit region :extend nil))
   "Face for the active side of the current row.")
@@ -834,7 +841,8 @@ With BACKWARD, move to the previous one."
 
 (defun dirdiff-open ()
   "Diff the files on the current row, or expand/collapse the directory.
-If the file exists on one side only, visit it."
+If the file exists on one side only, visit it, in a new frame if
+`dirdiff-visit-in-new-frame' is non-nil."
   (interactive)
   (let* ((node (dirdiff--node-at-point))
          (l (dirdiff-node-left node))
@@ -843,7 +851,9 @@ If the file exists on one side only, visit it."
      ((dirdiff--node-dir-p node)
       (dirdiff--set-open node (not (dirdiff--open-p node)))
       (dirdiff--render))
-     ((not (and l r)) (dirdiff-find-file-other-window))
+     ((not (and l r)) (dirdiff--visit (if dirdiff-visit-in-new-frame
+                                          #'find-file-other-frame
+                                        #'find-file-other-window)))
      (t
       (let ((what (cond ((memq 'module (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
                          "Submodules")
@@ -880,15 +890,19 @@ If the file exists on one side only, visit it."
   (dirdiff-mouse-select event)
   (dirdiff-open))
 
-(defun dirdiff-find-file-other-window ()
-  "Visit the file or directory on the active side in another window.
-If it only exists on the other side, visit that."
-  (interactive)
+(defun dirdiff--visit (find-file)
+  "Call FIND-FILE on the entry at point, on the active side if it exists there."
   (let* ((node (dirdiff--node-at-point))
          (side (if (dirdiff--node-entry node dirdiff--side)
                    dirdiff--side
                  (dirdiff--other-side dirdiff--side))))
-    (find-file-other-window (dirdiff--local-file node side))))
+    (funcall find-file (dirdiff--local-file node side))))
+
+(defun dirdiff-find-file-other-window ()
+  "Visit the file or directory on the active side in another window.
+If it only exists on the other side, visit that."
+  (interactive)
+  (dirdiff--visit #'find-file-other-window))
 
 ;;;; Commands: editing
 

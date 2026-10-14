@@ -9,11 +9,9 @@
 ;; It adds dirdiff commands to magit's diff menu (`d' in magit buffers),
 ;; replacing `git difftool -d' suffixes such as:
 ;;
-;;   D p   commit vs its previous commit (the commit at point; with
-;;         commits selected in a log, all of them)
+;;   D p   a range (at a commit, suggests <commit>^..<commit>)
 ;;   D h   revision vs HEAD
 ;;   D w   revision vs working tree
-;;   D r   a range, like `git difftool -d RANGE'
 ;;
 ;; Comparisons started from magit open in a new, maximized frame and
 ;; `q' deletes it again; see the end of this file to change that.
@@ -32,7 +30,7 @@
 (autoload 'dirdiff-dired "dirdiff" nil t)
 (autoload 'dirdiff-git "dirdiff-git" nil t)
 
-;;;; Option 1: the default keys (D p, D h, D w, D r)
+;;;; Option 1: the default keys (D p, D h, D w)
 
 (with-eval-after-load 'magit-diff
   (require 'dirdiff-git)
@@ -53,13 +51,11 @@
 ;; (with-eval-after-load 'magit-diff
 ;;   (require 'dirdiff-git)
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D p" "Dirdiff with previous" dirdiff-git-previous))
+;;     '("D p" "Dirdiff with previous" dirdiff-git))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D h" "Dirdiff with HEAD" dirdiff-git-against-head))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D w" "Dirdiff with working tree" dirdiff-git-against-worktree))
-;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D d" "Dirdiff range" dirdiff-git))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D s" "Dirdiff HEAD vs working tree" my/dirdiff-head-vs-worktree)))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
