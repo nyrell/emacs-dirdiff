@@ -44,11 +44,7 @@ Not on MELPA yet. Clone the repository and add to your init file:
 |---|---|
 | `M-x dirdiff` | two files (with ediff) or two directories; in Dired, the two marked entries |
 | `M-x dirdiff-dired` | the two directories marked in the visible Dired windows |
-| `M-x dirdiff-git` | git revisions, with `git difftool -d` syntax: `A..B`, `A...B`, or `A` (vs. working tree) |
-| `M-x dirdiff-git-commit` | a commit with its parent |
-| `M-x dirdiff-git-head` | a revision with `HEAD` |
-| `M-x dirdiff-git-worktree` | a revision with the working tree |
-| `M-x dirdiff-git-status` | `HEAD` with the working tree |
+| `M-x dirdiff-git` | git revisions, with `git difftool -d` syntax: `A..B`, `A...B`, `C^!` (a commit with its parent), `A` (with the working tree), or empty (`HEAD` with the working tree) |
 
 ### Keys in the dirdiff buffer
 
@@ -57,26 +53,22 @@ it.
 
 | Key | Action |
 |---|---|
-| `TAB`, `←`, `→` | switch active side |
+| `TAB`, click | switch active side |
 | `RET`, double-click | ediff the file pair / expand or collapse the directory / visit a one-sided file |
-| `SPC` | expand or collapse directory |
 | `n`, `p` | next / previous difference (expands directories as needed) |
-| `C-n`, `C-p`, `↑`, `↓` | next / previous row |
 | `^` | parent directory |
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
 | `=` | hide or show identical entries |
 | `w` | ignore whitespace on/off (also used by ediff) |
 | `b` | compare binary files byte by byte, or by size and time only |
-| `I` | leave out `.git`, `.hg`, `.svn`, … on/off |
 | `g` | compare again |
 | `>`, `<` | copy the entry to the right / left side (directories are replaced) |
-| `c` | copy from the active side to the other side |
 | `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
-| `o`, `f` | visit the file on the active side (other window / this window) |
+| `o` | visit the file on the active side in another window |
 | `?` | menu with all commands |
 | `q` | quit |
 
-There is also a *Dirdiff* menu in the menu bar and a tool bar.
+There is also a *Dirdiff* menu in the menu bar.
 
 ### Comparing
 
@@ -96,7 +88,7 @@ the working tree.
 
 Git comparisons hide identical entries initially, so they look like
 `git difftool -d`; press `=` to see the whole tree
-(`dirdiff-git-hide-identical`).
+(`dirdiff-hide-identical` applies to directory comparisons).
 
 ### Magit
 
@@ -154,10 +146,10 @@ other tools.
 
 `M-x customize-group RET dirdiff`. Among others:
 
-- `dirdiff-ignored-names`, `dirdiff-use-ignored-names`
+- `dirdiff-ignored-names` (`.git`, `.hg`, … by default; set to nil to include them)
 - `dirdiff-ignore-whitespace`
 - `dirdiff-binary-comparison`
-- `dirdiff-hide-identical`, `dirdiff-git-hide-identical`
+- `dirdiff-hide-identical`
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
 - `dirdiff-new-frame` — `magit` (default: new frame when started from
   magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`

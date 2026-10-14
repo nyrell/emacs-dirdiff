@@ -27,10 +27,6 @@
 (autoload 'dirdiff "dirdiff" nil t)
 (autoload 'dirdiff-dired "dirdiff" nil t)
 (autoload 'dirdiff-git "dirdiff-git" nil t)
-(autoload 'dirdiff-git-commit "dirdiff-git" nil t)
-(autoload 'dirdiff-git-head "dirdiff-git" nil t)
-(autoload 'dirdiff-git-worktree "dirdiff-git" nil t)
-(autoload 'dirdiff-git-status "dirdiff-git" nil t)
 
 ;;;; Option 1: the default keys (D p, D h, D w)
 
@@ -42,18 +38,24 @@
 ;;
 ;; Use this instead of option 1.  `(-1 -1 -1)' appends after the last
 ;; suffix of the last group, the same place `dirdiff-magit-setup' uses.
+;; `dirdiff-git' takes a range like `git difftool -d': A..B, A...B,
+;; C^! (a commit vs its parent) or A (vs the working tree).
 
+;; (defun my/dirdiff-head-vs-worktree ()
+;;   "Compare HEAD with the working tree."
+;;   (interactive)
+;;   (dirdiff-git "HEAD"))
+;;
 ;; (with-eval-after-load 'magit-diff
+;;   (require 'dirdiff-git)
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D d" "Dirdiff range or commit" dirdiff-git))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D c" "Dirdiff commit vs its parent" dirdiff-git-commit))
+;;     '("D h" "Dirdiff against HEAD" dirdiff-git--against-head))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D h" "Dirdiff against HEAD" dirdiff-git-head))
+;;     '("D w" "Dirdiff against working tree" dirdiff-git--against-worktree))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D w" "Dirdiff against working tree" dirdiff-git-worktree))
-;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D s" "Dirdiff HEAD vs working tree" dirdiff-git-status)))
+;;     '("D s" "Dirdiff HEAD vs working tree" my/dirdiff-head-vs-worktree)))
 
 ;;;; Optional extras
 

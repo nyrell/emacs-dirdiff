@@ -36,11 +36,12 @@ plain directories and for git revisions.
 ## Architecture
 
 ```
-dirdiff.el               options, faces, comparison engine (sources are
-                         generic: `dirdiff-dir-source`), view mode,
+dirdiff.el               options, faces, comparison engine, directory
+                         source (`dirdiff-dir-source`), view mode,
                          commands, menus, `dirdiff`, `dirdiff-difftool`
-dirdiff-git.el           git source (`dirdiff-git-source`), git commands,
-                         magit / vc integration
+dirdiff-git.el           git revision source (`dirdiff-git-source`); the
+                         working tree is a dirdiff-dir-source limited to
+                         the files git lists; `dirdiff-git`, magit / vc
 bin/dirdiff-difftool     wrapper for `git difftool --dir-diff`
 test/dirdiff-test.el     ERT tests
 ```
@@ -69,7 +70,7 @@ step 1 (prototypes, since removed).
 1. ✅ Widget prototypes → chose B2 (one buffer, two columns, active side).
 2. ✅ Comparison engine (filesystem) + ERT tests.
 3. ✅ Directory view: rendering, expand/collapse, sides, faces, ediff,
-   navigation, copy/delete, menus (transient, menu bar, tool bar).
+   navigation, copy/delete, menus (transient, menu bar).
 4. ✅ Git backend: revision vs revision / working tree; magit, vc and
    `M-x` entry points; `bin/dirdiff-difftool`.
 5. Polish: asynchronous comparison for very large trees, docstrings for

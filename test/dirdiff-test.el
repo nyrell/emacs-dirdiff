@@ -125,7 +125,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
 
 (ert-deftest dirdiff-test-ignore-whitespace-large-files ()
   (dirdiff-test--with-dirs '(("big" . "a  b\n")) '(("big" . "a b\n"))
-    (let ((dirdiff-large-file-size 1))
+    (let ((dirdiff--large-file-size 1))
       (should (eq (dirdiff-test--status
                    (dirdiff-test--session left right :ignore-whitespace t) "big")
                   'same))
@@ -160,9 +160,9 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
                            '((".git/HEAD" . "b") ("f" . "f"))
     (should (equal (dirdiff-test--statuses (dirdiff-test--session left right))
                    '(("f" . same))))
-    (should (equal (mapcar #'car (dirdiff-test--statuses
-                                  (dirdiff-test--session left right :use-ignored-names nil)))
-                   '(".git" ".git/HEAD" "CVS" "CVS/x" "f")))))
+    (let ((dirdiff-ignored-names nil))
+      (should (equal (mapcar #'car (dirdiff-test--statuses (dirdiff-test--session left right)))
+                     '(".git" ".git/HEAD" "CVS" "CVS/x" "f"))))))
 
 (ert-deftest dirdiff-test-symlinks ()
   (dirdiff-test--with-dirs
@@ -221,7 +221,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
         (should (eq dirdiff--side 'right))
         (should (= (current-column) (+ dirdiff--width 3)))
         ;; Point stays on the right side when moving down.
-        (dirdiff-next-line 1)
+        (forward-line 1)
         (dirdiff--post-command)
         (should (eq dirdiff--side 'right))
         ;; Next difference expands a/ and a/b/.
@@ -242,7 +242,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
 (ert-deftest dirdiff-test-mode-line-counts ()
   (dirdiff-test--with-dirs '(("c" . "1") ("l" . "l")) '(("c" . "2") ("r" . "r") ("r2" . "r"))
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
-      (should (string-prefix-p " |1 <1 >2" dirdiff--mode-line-status)))))
+      (should (string-prefix-p " |1 <1 >2" (dirdiff--mode-line))))))
 
 ;; Bug: the active side used to be derived from the cursor column after
 ;; every command, so moving to the start of the line switched sides.
@@ -283,7 +283,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
       (should (file-exists-p (expand-file-name "only/deep/new" right)))
       (should (eq (dirdiff-test--status dirdiff--session "only") 'same))
       (should (eq (dirdiff-node-status (dirdiff-session-tree dirdiff--session)) 'same))
-      (should (string-prefix-p " identical" dirdiff--mode-line-status)))))
+      (should (string-prefix-p " identical" (dirdiff--mode-line))))))
 
 (ert-deftest dirdiff-test-copy-directory-replaces ()
   (dirdiff-test--with-dirs '(("d/a" . "a") ("d/b" . "b")) '(("d/a" . "old") ("d/extra" . "x"))
@@ -311,7 +311,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
         (should-not (file-exists-p (expand-file-name "f" right)))
         (should (eq (dirdiff-test--status dirdiff--session "f") 'left))
         (dirdiff-test--goto "d")
-        (dirdiff-select-left)
+        (dirdiff--set-side 'left)
         (dirdiff-delete)
         (should-not (file-exists-p (expand-file-name "d" left)))
         (should-not (dirdiff-test--find dirdiff--session "d"))))))
@@ -348,12 +348,9 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
            ,@body)
        (delete-directory repo t))))
 
-(defun dirdiff-test--git-session (repo left-rev right-rev &rest options)
-  (let ((session (apply #'dirdiff-session-create
-                        :left (dirdiff-git--source repo left-rev)
-                        :right (dirdiff-git--source repo right-rev)
-                        :prepare #'dirdiff-git--prepare
-                        options)))
+(defun dirdiff-test--git-session (repo left-rev right-rev &optional ignore-whitespace)
+  (let ((session (dirdiff-git--session repo left-rev right-rev)))
+    (setf (dirdiff-session-ignore-whitespace session) ignore-whitespace)
     (dirdiff--build-tree session)
     session))
 
@@ -364,7 +361,7 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
                      '(("dir" . left) ("dir/g" . left) ("a.txt" . changed) ("bin" . same)
                        ("new" . right) ("same.txt" . same) ("ws.txt" . changed))))
       (should-not (dirdiff-source-writable (dirdiff-session-right s))))
-    (let ((s (dirdiff-test--git-session repo "HEAD~1" "HEAD" :ignore-whitespace t)))
+    (let ((s (dirdiff-test--git-session repo "HEAD~1" "HEAD" t)))
       (should (eq (dirdiff-test--status s "ws.txt") 'same))
       (should (eq (dirdiff-test--status s "a.txt") 'changed)))))
 
@@ -401,7 +398,7 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
         ;; The revision side is read-only.
         (dirdiff-test--goto "new")
         (should-error (dirdiff-copy-to-left) :type 'user-error)
-        (dirdiff-select-left)
+        (dirdiff--set-side 'left)
         (should-error (dirdiff-delete) :type 'user-error))
       ;; Killing the buffer removed the extracted files.
       (should-not (file-exists-p file)))))
@@ -417,7 +414,7 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
                  (lambda (session &rest _)
                    (dirdiff--build-tree session)
                    (dirdiff-test--statuses session))))
-        (should (equal (dirdiff-git-commit "HEAD~1")
+        (should (equal (dirdiff-git "HEAD~1^!")
                        '(("dir" . right) ("dir/g" . right) ("a.txt" . right) ("bin" . right)
                          ("same.txt" . right) ("ws.txt" . right))))))))
 
@@ -428,6 +425,10 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
     (should (equal (dirdiff-git--parse-range "..B") '("HEAD" "B")))
     (should (equal (dirdiff-git--parse-range "HEAD~1") '("HEAD~1" nil)))
     (should (equal (dirdiff-git--parse-range "") '("HEAD" nil)))
+    (should (equal (dirdiff-git--parse-range "HEAD^!")
+                   (list (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) "HEAD")))
+    (should (equal (dirdiff-git--parse-range "HEAD~1^!")
+                   (list dirdiff-git--empty-tree "HEAD~1")))
     (should (equal (dirdiff-git--parse-range "HEAD~1...HEAD")
                    (list (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) "HEAD")))))
 
