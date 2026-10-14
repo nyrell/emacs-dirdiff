@@ -159,8 +159,14 @@ on; use `M-x dirdiff-git` for that.
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
   `dirdiff-conflict`, `dirdiff-active-cell`
 
-## Tests
+## Development
 
 ```sh
-emacs --batch -Q -L . -l test/dirdiff-test.el -f ert-run-tests-batch-and-exit
+T=emacs-for-agents/tools/elisp-agent
+$T -L . check --doc dirdiff.el dirdiff-git.el   # parens, zero warnings, checkdoc
+$T indent dirdiff.el dirdiff-git.el             # standard indentation
+$T -L . test test/dirdiff-test.el               # ERT tests
 ```
+
+[`emacs-for-agents/`](emacs-for-agents/README.md) collects notes on writing
+Emacs Lisp with coding agents, and the `elisp-agent` tool used above.
