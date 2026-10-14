@@ -144,8 +144,7 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
     ;; contents differ.
     (let ((s (dirdiff-test--session left right :binary-comparison 'quick)))
       (should (eq (dirdiff-test--status s "same-size.bin") 'same))
-      (should (eq (dirdiff-test--status s "other-size.bin") 'changed))
-      (should (dirdiff-node-binary (dirdiff-test--find s "identical.bin"))))
+      (should (eq (dirdiff-test--status s "other-size.bin") 'changed)))
     (let ((s (dirdiff-test--session left right :binary-comparison 'full)))
       (should (eq (dirdiff-test--status s "same-size.bin") 'changed))
       (should (eq (dirdiff-test--status s "identical.bin") 'same)))
@@ -322,6 +321,59 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
       (dirdiff-test--goto "r")
       (should-error (dirdiff-copy-to-right) :type 'user-error))))
 
+;; Bug: copying onto a symlink wrote into the file it points to, even
+;; outside the compared tree.
+(ert-deftest dirdiff-test-copy-replaces-symlink ()
+  (dirdiff-test--with-dirs '(("f" . "new")) '(("outside/real" . "precious") ("f" link . "outside/real"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-test--goto "f")
+      (dirdiff-copy-to-right)
+      (should (equal (dirdiff-test--read (expand-file-name "outside/real" right)) "precious"))
+      (should-not (file-symlink-p (expand-file-name "f" right)))
+      (should (equal (dirdiff-test--read (expand-file-name "f" right)) "new")))))
+
+(defun dirdiff-test--messages (thunk)
+  "Call THUNK and return the messages it shows; fail if it runs ediff."
+  (let (messages)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+              ((symbol-function 'ediff-files)
+               (lambda (&rest _) (error "Ediff was started"))))
+      (funcall thunk))
+    messages))
+
+;; Bug: RET on two symlinks to directories ran ediff on directories.
+(ert-deftest dirdiff-test-open-links ()
+  (dirdiff-test--with-dirs '(("d/x" . "x") ("l" link . "d")) '(("e/x" . "x") ("l" link . "e"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-test--goto "l")
+      (should (equal (dirdiff-test--messages #'dirdiff-open)
+                     '("Symbolic links are different"))))))
+
+;; Bug: git difftool's left side is a temporary snapshot and its right
+;; side links into the working tree, yet both were fully writable.
+(ert-deftest dirdiff-test-difftool-sides ()
+  (dirdiff-test--with-dirs
+      '(("linked" . "old") ("plain" . "a") ("new" . "n"))
+      '(("worktree/linked" . "current") ("linked" link . "worktree/linked") ("plain" . "b"))
+    (let ((session (dirdiff--difftool-session left right)))
+      (should-not (dirdiff-source-writable (dirdiff-session-left session)))
+      (dirdiff-test--in-buffer session
+        ;; Copying onto a file linked to the working tree changes that file.
+        (dirdiff-test--goto "linked")
+        (dirdiff-copy-to-right)
+        (should (equal (dirdiff-test--read (expand-file-name "worktree/linked" right)) "old"))
+        (should (file-symlink-p (expand-file-name "linked" right)))
+        ;; Changes to the temporary files would be lost, so refuse them.
+        (dirdiff-test--goto "plain")
+        (should-error (dirdiff-copy-to-right) :type 'user-error)
+        (should-error (dirdiff-copy-to-left) :type 'user-error)
+        (dirdiff-test--goto "new")
+        (should-error (dirdiff-copy-to-right) :type 'user-error)
+        (dirdiff-test--goto "linked")
+        (dirdiff--set-side 'right)
+        (should-error (dirdiff-delete) :type 'user-error)))))
+
 ;;;; Git
 
 (defmacro dirdiff-test--with-repo (&rest body)
@@ -417,6 +469,31 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
         (should (equal (dirdiff-git "HEAD~1^!")
                        '(("dir" . right) ("dir/g" . right) ("a.txt" . right) ("bin" . right)
                          ("same.txt" . right) ("ws.txt" . right))))))))
+
+;; Bug: in git comparisons, RET on a changed binary file ran ediff.
+(ert-deftest dirdiff-test-git-open-binary ()
+  (dirdiff-test--with-repo
+    (dirdiff-test--write repo '(("bin" . "\0\2")))
+    (let ((dirdiff-new-frame nil))
+      (dirdiff-test--in-buffer (dirdiff-test--git-session repo "HEAD" nil)
+        (dirdiff-test--goto "bin")
+        (should (equal (dirdiff-test--messages #'dirdiff-open)
+                       '("Binary files are different")))))))
+
+;; Bugs: an untracked symlink whose path is a symlink in the revision
+;; crashed the comparison, and a quick binary comparison against a
+;; revision compared the time of the extracted copy.
+(ert-deftest dirdiff-test-git-untracked-link-and-binary ()
+  (dirdiff-test--with-repo
+    (cl-flet ((git (&rest args) (apply #'dirdiff-git--run repo args)))
+      (make-symbolic-link "nowhere" (expand-file-name "lnk" repo))
+      (dirdiff-test--write repo '(("bin2" . "\0same")))
+      (git "add" "lnk" "bin2")
+      (git "commit" "-q" "-m" "3")
+      (git "rm" "-q" "--cached" "lnk" "bin2"))
+    (let ((s (dirdiff-test--git-session repo "HEAD" nil)))
+      (should (eq (dirdiff-test--status s "lnk") 'same))
+      (should (eq (dirdiff-test--status s "bin2") 'same)))))
 
 (ert-deftest dirdiff-test-git-parse-range ()
   (dirdiff-test--with-repo

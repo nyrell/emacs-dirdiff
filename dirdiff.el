@@ -156,12 +156,15 @@ buffer, which leaves magit's windows as they were.  Quitting with
 (cl-defstruct (dirdiff-node (:constructor dirdiff-node-create)
                             (:copier nil))
   "A row in the comparison: a relative path and both sides of it."
-  name rel parent left right status children binary)
+  name rel parent left right status children)
 ;; STATUS is `same', `changed', `left' (left only), `right' (right
 ;; only) or `conflict' (file on one side, directory on the other).
 
 (cl-defstruct (dirdiff-source (:constructor nil) (:copier nil))
-  "Where one side of the comparison comes from."
+  "Where one side of the comparison comes from.
+WRITABLE is nil (read-only), t, or `through-links': only files that
+are symbolic links may be overwritten, by writing into the files they
+point to (git difftool's working tree side)."
   label writable)
 
 (cl-defstruct (dirdiff-dir-source (:include dirdiff-source)
@@ -290,9 +293,11 @@ PROGRAM with ARGS, if it is available."
   ;; Like `diff -w': ignore whitespace within lines, but not line breaks.
   (replace-regexp-in-string "[ \t\f\v\r]+" "" string t t))
 
-(defun dirdiff--compare-files (session a b node)
+(defun dirdiff--compare-files (session a b quick)
   "Compare local files A and B using the options of SESSION.
-Return `same' or `changed', and record in NODE whether they are binary."
+Return `same' or `changed'.  QUICK nil means that the modification
+times of A and B cannot be compared, so binary files are compared
+byte by byte even if SESSION says to compare them quickly."
   (let* ((attrs-a (file-attributes (file-truename a)))
          (attrs-b (file-attributes (file-truename b)))
          (sa (file-attribute-size attrs-a))
@@ -301,10 +306,9 @@ Return `same' or `changed', and record in NODE whether they are binary."
     (if (and (eql sa 0) (eql sb 0))
         'same
       (let ((binary (or (dirdiff--binary-file-p a) (dirdiff--binary-file-p b))))
-        (setf (dirdiff-node-binary node) binary)
         (if (cond
              ((and binary (not (eql sa sb))) nil)
-             ((and binary (eq (dirdiff-session-binary-comparison session) 'quick))
+             ((and binary quick (eq (dirdiff-session-binary-comparison session) 'quick))
               (time-equal-p (file-attribute-modification-time attrs-a)
                             (file-attribute-modification-time attrs-b)))
              ((and (not binary) (dirdiff-session-ignore-whitespace session))
@@ -325,23 +329,30 @@ It is what the session's `prepare' function returned.")
          (lt (dirdiff-entry-type l))
          (rt (dirdiff-entry-type r)))
     (or (and dirdiff--status-function (funcall dirdiff--status-function node))
-        (cond
-         ((or (eq lt 'link) (eq rt 'link))
-          (if (and (eq lt 'link) (eq rt 'link)
-                   (equal (file-symlink-p (dirdiff-entry-file l))
-                          (file-symlink-p (dirdiff-entry-file r))))
-              'same 'changed))
-         ((or (eq lt 'module) (eq rt 'module)) 'changed)
-         (t
-          (condition-case err
-              (dirdiff--compare-files
-               session
-               (dirdiff-source-file (dirdiff-session-left session) l (dirdiff-node-rel node))
-               (dirdiff-source-file (dirdiff-session-right session) r (dirdiff-node-rel node))
-               node)
-            (file-error
-             (message "dirdiff: %s" (error-message-string err))
-             'changed)))))))
+        (condition-case err
+            (cl-flet ((file (side) (dirdiff-source-file (dirdiff--session-source session side)
+                                                        (dirdiff--node-entry node side)
+                                                        (dirdiff-node-rel node))))
+              (cond
+               ((or (eq lt 'link) (eq rt 'link))
+                (if (and (eq lt 'link) (eq rt 'link)
+                         (equal (dirdiff--link-target l (file 'left))
+                                (dirdiff--link-target r (file 'right))))
+                    'same 'changed))
+               ((or (eq lt 'module) (eq rt 'module)) 'changed)
+               (t (dirdiff--compare-files session (file 'left) (file 'right)
+                                          (and (dirdiff-entry-mtime l)
+                                               (dirdiff-entry-mtime r))))))
+          (file-error
+           (message "dirdiff: %s" (error-message-string err))
+           'changed)))))
+
+(defun dirdiff--link-target (entry file)
+  "The target of symbolic link ENTRY, whose contents are in local FILE.
+For a link in a git revision, FILE holds the target as its contents."
+  (if (dirdiff-entry-file entry)
+      (file-symlink-p file)
+    (decode-coding-string (dirdiff--read-bytes file) 'utf-8)))
 
 ;;;; Building the tree
 
@@ -439,7 +450,6 @@ It is what the session's `prepare' function returned.")
         (setf (dirdiff-node-children parent) (delq node (dirdiff-node-children parent)))
       (setf (dirdiff-node-left node) left
             (dirdiff-node-right node) right
-            (dirdiff-node-binary node) nil
             (dirdiff-node-children node) (and (dirdiff--node-dir-p node)
                                               (dirdiff--build-children session node))
             (dirdiff-node-status node) (dirdiff--node-status session node)))
@@ -809,12 +819,18 @@ If the file exists on one side only, visit it."
       (dirdiff--set-open node (not (dirdiff--open-p node)))
       (dirdiff--render))
      ((not (and l r)) (dirdiff-find-file-other-window))
-     ((memq 'module (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
-      (message "Submodule %s" (if (eq (dirdiff-node-status node) 'same) "unchanged" "changed")))
-     ((dirdiff-node-binary node)
-      (message "Binary files are %s" (if (eq (dirdiff-node-status node) 'same)
-                                         "identical" "different")))
-     (t (dirdiff--ediff node)))))
+     (t
+      (let ((what (cond ((memq 'module (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
+                         "Submodules")
+                        ((memq 'link (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
+                         "Symbolic links")
+                        ((or (dirdiff--binary-file-p (dirdiff--local-file node 'left))
+                             (dirdiff--binary-file-p (dirdiff--local-file node 'right)))
+                         "Binary files"))))
+        (if what
+            (message "%s are %s" what (if (eq (dirdiff-node-status node) 'same)
+                                          "identical" "different"))
+          (dirdiff--ediff node)))))))
 
 (defun dirdiff-mouse-open (event)
   "Open the entry clicked on with EVENT, like `dirdiff-open'."
@@ -854,17 +870,23 @@ If it only exists on the other side, visit that."
                     (user-error "Nothing to copy: %s does not exist on the %s side"
                                 (dirdiff-node-rel node) from)))
          (dest (dirdiff--writable-path node to))
-         (existing (dirdiff--node-entry node to)))
+         (existing (dirdiff--node-entry node to))
+         (through-links (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session to))
+                            'through-links)))
+    (when (and through-links
+               (not (and (eq (dirdiff-entry-type entry) 'file)
+                         existing (eq (dirdiff-entry-type existing) 'file)
+                         (file-symlink-p dest))))
+      (user-error "Only files linked to the working tree can be changed here"))
     (when (y-or-n-p (format "%s %s%s to the %s side? "
                             (if existing "Replace" "Copy")
                             (dirdiff-node-rel node)
                             (if (dirdiff--entry-dir-p entry) "/" "")
                             to))
-      ;; Directories are replaced as a whole so that both sides end up
-      ;; identical; files are overwritten in place (which also writes
-      ;; through symlinks, as in git difftool's working tree side).
-      (when (and existing (or (dirdiff--entry-dir-p existing) (dirdiff--entry-dir-p entry)
-                              (eq (dirdiff-entry-type existing) 'link)))
+      ;; Replace what is there, so that both sides end up identical
+      ;; (a symlink is replaced, not written through), except where
+      ;; writing through links is the point.
+      (when (and existing (not through-links))
         (dirdiff--delete-local dest))
       (make-directory (file-name-directory (directory-file-name dest)) t)
       (dirdiff-source-copy-to (dirdiff--session-source dirdiff--session from)
@@ -892,6 +914,8 @@ The file is moved to the trash if `delete-by-moving-to-trash' is non-nil."
                     (user-error "%s does not exist on the %s side"
                                 (dirdiff-node-rel node) side)))
          (file (dirdiff--writable-path node side)))
+    (unless (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session side)) t)
+      (user-error "Cannot delete on the %s side" side))
     (when (yes-or-no-p (format "Delete %s%s on the %s side? "
                                (dirdiff-node-rel node)
                                (if (dirdiff--entry-dir-p entry) "/ and its contents" "")
@@ -1118,17 +1142,36 @@ is quit, DONE-FILE is deleted, which tells the waiting script that git
 may clean up.  With STANDALONE, Emacs exits when the comparison is quit.
 Otherwise the comparison gets a new frame, as it is started from
 outside Emacs."
-  (let ((dirdiff-new-frame (not standalone)))
-    (dirdiff-show-session
-     (dirdiff-session-create
-      :left (dirdiff--dir-source left t)
-      :right (dirdiff--dir-source right t)
-      :hide-identical t
-      :cleanup (list (lambda ()
-                       (when (and done-file (file-exists-p done-file))
-                         (delete-file done-file))
-                       (when standalone
-                         (run-at-time 0 nil #'kill-emacs))))))))
+  (let* ((session (dirdiff--difftool-session left right))
+         (buffer (let ((dirdiff-new-frame (not standalone)))
+                   (dirdiff-show-session session)))
+         (frame (window-frame (get-buffer-window buffer t)))
+         (on-delete-frame (lambda (f)
+                            ;; Deleting the frame also ends the comparison,
+                            ;; or the script would wait forever.
+                            (when (and (eq f frame) (buffer-live-p buffer))
+                              (kill-buffer buffer)))))
+    (add-hook 'delete-frame-functions on-delete-frame)
+    (push (lambda ()
+            (remove-hook 'delete-frame-functions on-delete-frame)
+            (when (and done-file (file-exists-p done-file))
+              (delete-file done-file))
+            (when standalone
+              (run-at-time 0 nil #'kill-emacs)))
+          (dirdiff-session-cleanup session))
+    buffer))
+
+(defun dirdiff--difftool-session (left right)
+  "Return a session for git difftool's directories LEFT and RIGHT.
+LEFT is a temporary snapshot, so it is read-only.  When RIGHT is the
+working tree, git fills it with symbolic links to the working tree's
+files; only those can be changed, which changes the working tree."
+  (dirdiff-session-create
+   :left (dirdiff--dir-source left)
+   :right (dirdiff--dir-source
+           right (and (cl-some #'file-symlink-p (directory-files-recursively right ""))
+                      'through-links))
+   :hide-identical t))
 
 (provide 'dirdiff)
 ;;; dirdiff.el ends here

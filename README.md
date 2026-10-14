@@ -139,8 +139,11 @@ in a new frame there and the script waits until you quit it. Otherwise it starts
 Emacs that exits when you quit the comparison. Set `DIRDIFF_EMACSCLIENT` or
 `DIRDIFF_EMACS` to use other commands.
 
-Editing the right side in `git difftool -d` edits your working tree, as with
-other tools.
+git hands the tool temporary copies, so the left side is read-only. When the
+right side is your working tree, git fills it with links to your files: copying
+a file onto one of those, or saving it in ediff, changes your working tree.
+Adding or deleting files is refused there, because git would not pass the change
+on; use `M-x dirdiff-git` for that.
 
 ## Customization
 
