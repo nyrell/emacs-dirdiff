@@ -14,7 +14,9 @@ Lisp. Start here; each topic has its own file with the details.
    (`string-length`) and wrong arguments are the most common LLM mistake.
 3. **Look for a built-in first.** Before writing a helper, run
    `tools/elisp-agent builtins GROUP` (string, list, file-name, …). Emacs
-   probably has it. → [use-builtins.md](use-builtins.md)
+   probably has it. To learn how things fit together, read the manual:
+   `tools/elisp-agent info --index elisp TOPIC`.
+   → [use-builtins.md](use-builtins.md), [tools.md](tools.md#info)
 4. **Edit whole top-level forms.** Replace an entire `defun` rather than
    patching a few parentheses in the middle. `tools/elisp-agent forms FILE`
    gives the line range of each form.
@@ -33,7 +35,7 @@ Lisp. Start here; each topic has its own file with the details.
 
 | File | What it covers |
 |---|---|
-| [tools.md](tools.md) | `elisp-agent`: structure check, compile, describe, built-ins, eval, tests |
+| [tools.md](tools.md) | `elisp-agent`: structure check, compile, describe, built-ins, manuals, eval, tests |
 | [best-practices.md](best-practices.md) | Conventions: files, naming, loading, variables, modes, buffers, processes |
 | [use-builtins.md](use-builtins.md) | What not to reinvent, and how to find what exists |
 | [testing.md](testing.md) | ERT tests: layout, fixtures, mocking, testing commands and buffers |
@@ -49,6 +51,8 @@ T=emacs-for-agents/tools/elisp-agent
 $T check mypkg.el                 # parens, then byte-compile; exit 1 on problems
 $T describe string-trim seq-reduce  # does it exist, and how is it called?
 $T builtins string                # built-in string functions
+$T info --index elisp add-hook    # find it in the Elisp manual
+$T info elisp "Setting Hooks"     # read that section
 $T -L . --require mypkg eval '(mypkg-parse "a,b")'
 $T -L . test test/mypkg-test.el   # run ERT
 ```

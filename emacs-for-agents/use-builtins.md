@@ -13,6 +13,7 @@ is in no model's short-term memory. Search before you write.
 | What does it really return? | `elisp-agent eval '(NAME ...)'` |
 | Anything with "trim" in its name? | `elisp-agent eval '(apropos-internal "trim" (quote fboundp))'` |
 | Which library defines a feature? | `elisp-agent eval '(locate-library "seq")'` |
+| How is this done properly (hooks, modes, processes…)? | `elisp-agent info --index elisp TOPIC`, then `elisp-agent info elisp NODE` |
 
 Rule of thumb: if a helper takes less than three lines and sounds generic
 ("join paths", "trim a string", "unique elements"), it almost certainly

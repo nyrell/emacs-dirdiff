@@ -52,6 +52,10 @@ check fails, the model cannot tell which edit broke it.
   as an error.**
 - When unsure what something returns, `eval` it instead of guessing:
   `elisp-agent eval '(split-string "a,,b" ",")'`.
+- For a concept rather than one function (hooks, keymaps, text
+  properties), read the manual section instead of guessing:
+  `elisp-agent info --index elisp keymap`, then print the node it names.
+  Read only the node you need; whole manuals do not fit in a small context.
 
 ## Testing
 

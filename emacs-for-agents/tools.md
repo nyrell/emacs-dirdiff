@@ -11,6 +11,9 @@ elisp-agent forms FILE
 elisp-agent indent [--fix] FILE...
 elisp-agent describe SYMBOL...
 elisp-agent builtins [GROUP]
+elisp-agent info [MANUAL [NODE]]
+elisp-agent info --index MANUAL TOPIC
+elisp-agent info --search MANUAL REGEXP
 elisp-agent eval EXPRESSION...
 elisp-agent test FILE... [-s SELECTOR]
 ```
@@ -74,6 +77,31 @@ Without an argument, lists the topic groups from Emacs's `shortdoc`: `string`,
 `text-properties`, `overlay`, `process`, `regexp`, `keymaps`, `number`,
 `vector`, `symbol`, `comparison`. With a group, prints every function in it
 with its one-line summary. Check here before writing a helper.
+
+## info
+
+Reads the Info manuals (the Elisp reference manual is `elisp`, the user
+manual is `emacs`) as plain text. Use `describe` for one function; use the
+manual for concepts, conventions and how functions work together.
+
+```
+$ elisp-agent info                                    # installed manuals
+$ elisp-agent info --index elisp add-hook             # where is it explained?
+add-hook: (elisp) Setting Hooks, line N
+$ elisp-agent info elisp "Setting Hooks"              # print that node
+$ elisp-agent info "(elisp) Coding Conventions"       # cross-reference form
+$ elisp-agent info --search elisp "buffer-local hook" # full text, up to 50 hits
+```
+
+Start with `--index`; it finds functions, variables and concepts. Use
+`--search` when the index has nothing. A node's menu (`* Name::`) and
+cross references (`*Note Name::`, `*note (emacs)Name::`) name other nodes;
+read them with another `info` call. Nodes can be long, so pipe through
+`head` or `sed -n` when you only need the start.
+
+If a manual is not installed, `info` says so, lists what is installed and
+prints the node's address on gnu.org. On Debian and Ubuntu the Emacs
+manuals are in the package `emacs-common-non-dfsg`.
 
 ## eval
 

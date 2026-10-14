@@ -10,6 +10,7 @@
 ;;   elisp-agent indent [--fix] FILE...            lines Emacs would indent differently
 ;;   elisp-agent describe SYMBOL...                exists? arguments, docstring
 ;;   elisp-agent builtins [GROUP]                  built-in functions by topic
+;;   elisp-agent info [MANUAL [NODE]]              read Info manuals (also --index, --search)
 ;;   elisp-agent eval EXPRESSION                   evaluate, print the result
 ;;   elisp-agent test FILE... [-s SELECTOR]        run ERT tests
 ;;
@@ -29,6 +30,7 @@
 (require 'bytecomp)
 (require 'checkdoc)
 (require 'warnings)                     ; before mocking display-warning
+(require 'info)
 
 (defvar elisp-agent--failed nil "Non-nil once a check has failed.")
 
@@ -292,6 +294,88 @@ That is, names a few edits away, and defined tails of NAME: for
                                (elisp-agent--first-line
                                 (ignore-errors (documentation (car item) t)))))))))
 
+;;;; info
+
+(defun elisp-agent--info-manuals ()
+  "Return the names of the installed Info manuals, sorted."
+  (let (names)
+    (dolist (dir Info-directory-list)
+      (dolist (file (and (file-directory-p dir)
+                         (directory-files dir nil "\\.info\\(?:-[0-9]+\\)?\\(?:\\.[a-z0-9]+\\)?\\'")))
+        (push (replace-regexp-in-string "\\.info.*\\'" "" file) names)))
+    (sort (delete-dups names) #'string<)))
+
+(defun elisp-agent--info-url (manual node)
+  "Return the gnu.org address of NODE in Emacs's MANUAL.
+Texinfo writes spaces as dashes and other characters as _00XX."
+  (format "https://www.gnu.org/software/emacs/manual/html_node/%s/%s.html"
+          manual
+          (if (equal node "Top")
+              "index"
+            (mapconcat (lambda (c)
+                         (cond ((eq c ?\s) "-")
+                               ((string-match-p "[[:alnum:]]" (string c)) (string c))
+                               (t (format "_%04x" c))))
+                       node ""))))
+
+(defun elisp-agent--info-visit (manual node)
+  "Go to NODE of MANUAL in the Info buffer; return nil if MANUAL is missing."
+  (condition-case nil
+      (progn (Info-find-node manual node) t)
+    (user-error
+     (elisp-agent--fail "Manual %s is not installed. Installed: %s\n  Online, if it is an Emacs manual: %s\n  (On Debian and Ubuntu the Emacs manuals are in the package emacs-common-non-dfsg.)"
+                        manual (string-join (elisp-agent--info-manuals) " ")
+                        (elisp-agent--info-url manual node))
+     nil)))
+
+(defun elisp-agent--info-index (manual topic)
+  "List the index entries of MANUAL that contain TOPIC."
+  (when (elisp-agent--info-visit manual "Top")
+    (condition-case nil
+        (progn
+          (Info-index topic)
+          (dolist (entry Info-index-alternatives)
+            (elisp-agent--say "%s: (%s) %s, line %s"
+                              (substring-no-properties (car entry))
+                              manual (nth 1 entry) (nth 3 entry))))
+      (user-error (elisp-agent--fail "%s: not in the index of %s; try --search" topic manual)))))
+
+(defun elisp-agent--info-search (manual regexp)
+  "List the nodes of MANUAL with text matching REGEXP, and the matching lines."
+  (when (elisp-agent--info-visit manual "Top")
+    (let ((found 0))
+      (condition-case nil
+          (while (< found 50)
+            (Info-search regexp)
+            (setq found (1+ found))
+            (elisp-agent--say "(%s) %s: %s" manual Info-current-node
+                              (string-trim (buffer-substring-no-properties
+                                            (line-beginning-position) (line-end-position))))
+            (forward-line 1))
+        ((user-error search-failed) nil))
+      (when (zerop found)
+        (elisp-agent--fail "%s: not found in %s" regexp manual)))))
+
+(defun elisp-agent-info (args)
+  "Read Info manuals as ARGS say.
+No ARGS: list the installed manuals.  MANUAL [NODE]: print a node
+\(default Top); \"(MANUAL) NODE\" works too.  --index MANUAL TOPIC: index
+entries.  --search MANUAL REGEXP: nodes with matching text."
+  (info-initialize)
+  ;; "(elisp) Node" as written in cross references: split it.
+  (when (and (= (length args) 1)
+             (string-match "\\`(\\([^)]+\\)) *\\(.*\\)\\'" (car args)))
+    (setq args (list (match-string 1 (car args)) (match-string 2 (car args)))))
+  (let ((inhibit-message t))            ; Info reports every step
+    (pcase args
+      ('nil (elisp-agent--say "%s" (string-join (elisp-agent--info-manuals) " ")))
+      (`("--index" ,manual ,topic) (elisp-agent--info-index manual topic))
+      (`("--search" ,manual ,regexp) (elisp-agent--info-search manual regexp))
+      ((and `(,manual . ,node) (guard (not (string-prefix-p "-" manual))) (guard (null (cdr node))))
+       (when (elisp-agent--info-visit manual (if (member (car node) '(nil "")) "Top" (car node)))
+         (elisp-agent--say "%s" (buffer-substring-no-properties (point-min) (point-max)))))
+      (_ (elisp-agent--fail "Usage: elisp-agent info [MANUAL [NODE] | --index MANUAL TOPIC | --search MANUAL REGEXP]")))))
+
 ;;;; eval
 
 (defun elisp-agent-eval (args)
@@ -332,9 +416,10 @@ That is, names a few edits away, and defined tails of NAME: for
       ("indent" (elisp-agent-indent args))
       ("describe" (elisp-agent-describe args))
       ("builtins" (elisp-agent-builtins args))
+      ("info" (elisp-agent-info args))
       ("eval" (elisp-agent-eval args))
       ("test" (elisp-agent-test args))
-      (_ (elisp-agent--fail "Usage: elisp-agent check|forms|indent|describe|builtins|eval|test ...")))
+      (_ (elisp-agent--fail "Usage: elisp-agent check|forms|indent|describe|builtins|info|eval|test ...")))
     (kill-emacs (if elisp-agent--failed 1 0))))
 
 (provide 'elisp-agent)

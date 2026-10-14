@@ -18,4 +18,4 @@ Each of these cost real debugging time while writing dirdiff and its tools.
 | `checkdoc-file` in batch prints warnings but returns success | In batch it reports through `display-warning` | Capture `display-warning` (after `(require 'warnings)`) or use `elisp-agent check --doc` |
 | checkdoc: "Name emacs should appear capitalized as Emacs" for a shell command in a comment | checkdoc reads comments as prose | Quote commands like code: `` `emacs --batch ...' `` |
 | `(ert-run-tests-batch-and-exit)` "passes" | No tests were loaded | Check the `Ran N tests` line |
-| Elisp manual missing (`info` says not installed) | Debian ships it separately | Install `emacs-common-non-dfsg`, or read it online |
+| Elisp manual missing (`info` says not installed) | Debian ships it separately | Install `emacs-common-non-dfsg`, or read it online; `elisp-agent info` prints the gnu.org address |

@@ -51,5 +51,37 @@
                             (with-output-to-string (elisp-agent-describe '("string-length")))))
     (should elisp-agent--failed)))
 
+(defconst elisp-agent-test--manual
+  (concat "\^_\nFile: mini.info,  Node: Top,  Next: Hooks,  Up: (dir)\n\n"
+          "Mini manual\n\n* Menu:\n\n* Hooks::\n* Index::\n\n"
+          "\^_\nFile: mini.info,  Node: Hooks,  Next: Index,  Prev: Top,  Up: Top\n\n"
+          "Hooks\n=====\n\nUse add-hook to add a function.\n\n"
+          "\^_\nFile: mini.info,  Node: Index,  Prev: Hooks,  Up: Top\n\n"
+          "\0\b[index\0\b]\n* Menu:\n\n"
+          "* add-hook:                              Hooks.               (line 6)\n\n\^_\n")
+  "A tiny Info manual with a Top, a Hooks and an Index node.")
+
+(ert-deftest elisp-agent-test-info ()
+  (let* ((file (make-temp-file "elisp-agent-test-" nil ".info" elisp-agent-test--manual))
+         (run (lambda (&rest args)
+                (let ((elisp-agent--failed nil))
+                  (cons (replace-regexp-in-string
+                         (regexp-quote file) "M"
+                         (with-output-to-string (elisp-agent-info args)))
+                        elisp-agent--failed)))))
+    (unwind-protect
+        (progn
+          (should (string-match-p "\\`File: mini.info,  Node: Hooks.*\n\nHooks\n=====\n\nUse add-hook"
+                                  (car (funcall run file "Hooks"))))
+          (should (string-match-p "Node: Hooks" (car (funcall run (format "(%s) Hooks" file)))))
+          (should (equal (funcall run "--index" file "add-hook")
+                         '("add-hook: (M) Hooks, line 6\n" . nil)))
+          (should (cdr (funcall run "--index" file "remove-hook")))
+          (should (equal (funcall run "--search" file "a function")
+                         '("(M) Hooks: Use add-hook to add a function.\n" . nil)))
+          (should (string-match-p "not installed.*\n.*/html_node/no-such-manual/M_002dx\\.html"
+                                  (car (funcall run "no-such-manual" "M-x")))))
+      (delete-file file))))
+
 (provide 'elisp-agent-test)
 ;;; elisp-agent-test.el ends here
