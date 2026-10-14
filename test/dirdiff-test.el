@@ -295,7 +295,7 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
       (dirdiff-test--goto "d")
       (dirdiff-copy-to-right)
-      (should (equal (directory-files (expand-file-name "d" right) nil "^[^.]") '("a" "b")))
+      (should (equal (directory-files (expand-file-name "d" right) nil "\\`[^.]") '("a" "b")))
       (should (eq (dirdiff-test--status dirdiff--session "d") 'same)))))
 
 (ert-deftest dirdiff-test-copy-to-left-and-conflict ()
