@@ -114,6 +114,10 @@ This adds to magit's diff menu (`d`):
 | `D h` | revision against `HEAD` |
 | `D w` | revision against the working tree |
 
+Comparisons started from magit open in a new (maximized) frame, so
+magit's windows are left alone; `q` deletes the frame again. See
+`dirdiff-new-frame` and `dirdiff-frame-parameters`.
+
 See [`examples/dirdiff-magit-config.el`](examples/dirdiff-magit-config.el)
 for a complete example, including how to pick your own keys.
 
@@ -139,7 +143,7 @@ git difftool -d --tool=dirdiff HEAD~3
 ```
 
 If an Emacs server is running (`M-x server-start`), the comparison opens
-there and the script waits until you quit it. Otherwise it starts a new
+in a new frame there and the script waits until you quit it. Otherwise it starts a new
 Emacs that exits when you quit the comparison. Set `DIRDIFF_EMACSCLIENT` or
 `DIRDIFF_EMACS` to use other commands.
 
@@ -155,6 +159,8 @@ other tools.
 - `dirdiff-binary-comparison`
 - `dirdiff-hide-identical`, `dirdiff-git-hide-identical`
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
+- `dirdiff-new-frame` — `magit` (default: new frame when started from
+  magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
   `dirdiff-conflict`, `dirdiff-active-cell`
 

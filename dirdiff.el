@@ -104,6 +104,20 @@ Below the limit files are compared in Lisp.  Above it `cmp' (or
 `diff -w' when ignoring whitespace) is used when available."
   :type 'integer)
 
+(defcustom dirdiff-new-frame 'magit
+  "Whether to show a comparison in a new frame.
+nil shows it in the selected window and t always in a new frame.
+`magit' uses a new frame when the comparison is started from a magit
+buffer, which leaves magit's windows as they were.  Quitting with
+\<dirdiff-mode-map>\[dirdiff-quit] deletes a frame made this way."
+  :type '(choice (const :tag "Selected window" nil)
+                 (const :tag "New frame" t)
+                 (const :tag "New frame when started from magit" magit)))
+
+(defcustom dirdiff-frame-parameters '((fullscreen . maximized))
+  "Frame parameters for the frames made according to `dirdiff-new-frame'."
+  :type '(alist :key-type symbol :value-type sexp))
+
 (defcustom dirdiff-indicators '("▾ " "▸ " "  ")
   "Strings shown before expanded directories, collapsed ones and files."
   :type '(list (string :tag "Expanded") (string :tag "Collapsed") (string :tag "File")))
@@ -974,7 +988,8 @@ The file is moved to the trash if `delete-by-moving-to-trash' is non-nil."
       (dirdiff--render))))
 
 (defun dirdiff-quit ()
-  "Quit the comparison and kill its buffer."
+  "Quit the comparison and kill its buffer.
+If the comparison has its own frame, delete it."
   (interactive)
   (quit-window t))
 
@@ -1155,7 +1170,10 @@ copy, delete and visit act on it.
 (defun dirdiff-show-session (session &optional buffer-name)
   "Compare the sides of SESSION and display the result.
 BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
-  (let ((buffer (generate-new-buffer
+  (let ((new-frame (if (eq dirdiff-new-frame 'magit)
+                       (derived-mode-p 'magit-mode)
+                     dirdiff-new-frame))
+        (buffer (generate-new-buffer
                  (or buffer-name
                      (format "*dirdiff %s ↔ %s*"
                              (dirdiff-source-label (dirdiff-session-left session))
@@ -1167,7 +1185,11 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
        (dirdiff--cleanup-session session)
        (signal (car err) (cdr err))))
     (dirdiff--initial-expansion session)
-    (pop-to-buffer-same-window buffer)
+    ;; `quit-window' deletes a frame that `display-buffer' made.
+    (pop-to-buffer buffer (if new-frame
+                              `((display-buffer-pop-up-frame)
+                                (pop-up-frame-parameters . ,dirdiff-frame-parameters))
+                            '((display-buffer-same-window))))
     (dirdiff-mode)
     (setq dirdiff--session session)
     (dirdiff--render)
@@ -1249,8 +1271,11 @@ are compared."
   "Compare LEFT and RIGHT for `git difftool --dir-diff'.
 This is called by the `dirdiff-difftool' script.  When the comparison
 is quit, DONE-FILE is deleted, which tells the waiting script that git
-may clean up.  With STANDALONE, Emacs exits when the comparison is quit."
-  (let ((buffer (dirdiff-directories left right)))
+may clean up.  With STANDALONE, Emacs exits when the comparison is quit.
+Otherwise the comparison gets a new frame, as it is started from
+outside Emacs."
+  (let ((buffer (let ((dirdiff-new-frame (not standalone)))
+                  (dirdiff-directories left right))))
     (with-current-buffer buffer
       (setf (dirdiff-session-hide-identical dirdiff--session) t)
       (dirdiff--render)

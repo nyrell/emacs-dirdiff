@@ -13,6 +13,9 @@
 ;;   D h   revision vs HEAD
 ;;   D w   revision vs working tree
 ;;
+;; Comparisons started from magit open in a new, maximized frame and
+;; `q' deletes it again; see the end of this file to change that.
+;;
 ;; If you already add suffixes with these keys (for example from a
 ;; magit-difftool.el), remove those first, or use other keys below.
 
@@ -53,6 +56,12 @@
 ;;     '("D s" "Dirdiff HEAD vs working tree" dirdiff-git-status)))
 
 ;;;; Optional extras
+
+;; Where comparisons are shown: `magit' (the default) uses a new frame
+;; when started from magit, t always, nil never (the selected window).
+;; (setq dirdiff-new-frame t)
+;; New frames are maximized; to get a normal frame instead:
+;; (setq dirdiff-frame-parameters nil)
 
 ;; `D' in vc log buffers (C-x v l): the revision at point vs its parent,
 ;; or the oldest vs the newest revision in the region.
