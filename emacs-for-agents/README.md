@@ -85,6 +85,27 @@ Note on policy: the GNU project currently does not accept LLM-generated code
 into Emacs or GNU ELPA ([emacs-devel, March 2026][5]; [RMS on ELPA][6]).
 MELPA has no such rule, but it requires `package-lint` and `checkdoc` to pass.
 
+## Related work
+
+Other people's notes and tools for the same problem; worth reading, and
+the source of several ideas here:
+
+- [xenodium/emacs-skills](https://github.com/xenodium/emacs-skills):
+  Claude Code skills that drive a live Emacs through `emacsclient`
+  (open, select, highlight, describe).
+- [ollama-buddy's skills](https://github.com/captainflasmr/ollama-buddy/tree/main/.agents/skills):
+  `elisp-dev` (debugging, Edebug, error messages) and `elisp-review` (a
+  review checklist: hooks and advice removed, `user-error`, autoloads).
+- [parenmedic](https://github.com/shcv/parenmedic): repairs parentheses
+  from the indentation, also as an MCP server; the idea behind
+  `check`'s hint.
+- [Parinfer](https://shaunlebron.github.io/parinfer/): parens inferred from
+  indentation, for editors.
+- [The Emacs Lisp Style Guide](https://github.com/bbatsov/emacs-lisp-style-guide):
+  community style beyond the manual's conventions.
+- [relint](https://elpa.gnu.org/packages/relint.html): finds regexp
+  mistakes; used by `check --regexp`.
+
 ## Sources
 
 - Emacs Lisp manual, *Tips and Conventions*:

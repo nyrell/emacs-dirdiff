@@ -24,7 +24,12 @@ check fails, the model cannot tell which edit broke it.
 
 - **Do not count parentheses by eye**, and do not reason about them in
   long chains of thought. Run `elisp-agent check`. It says, in words,
-  which form is missing parens and where the next form starts.
+  which form is missing parens and where the next form starts, and its
+  hint names the line where your indentation and your parens disagree.
+- **Indent carefully; it is how the tool finds your paren mistakes.**
+  Models get indentation right more often than parentheses. Write each
+  line at the depth you mean, and the hint will point at the missing or
+  extra `)`.
 - **Replace whole top-level forms.** Get the line range from
   `elisp-agent forms FILE`, write the complete new `defun`, and replace the
   lines. Inserting or deleting single `)` characters is where most

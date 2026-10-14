@@ -10,7 +10,7 @@ the steps that apply.
 | 1 | Byte-compile | Unknown functions, wrong arity, free variables, typos | `elisp-agent check` (zero warnings) |
 | 2 | Load in `emacs -Q` | Missing `require`, load-time errors | `emacs --batch -Q -L . --eval "(require 'mypkg)"` |
 | 3 | Unit tests | Wrong results | `elisp-agent test` (see [testing.md](testing.md)) |
-| 4 | Lint | Docstrings, headers, naming, MELPA rules | `check --doc`, `indent`, package-lint |
+| 4 | Lint | Docstrings, headers, naming, MELPA rules, regexps | `check --doc --regexp`, `indent`, package-lint |
 | 5 | Command loop in batch | Hooks, keymaps, real key sequences | `execute-kbd-macro` |
 | 6 | Live Emacs | Display, windows, frames, interaction with the user's setup | `emacsclient --eval` |
 | 7 | Screenshot | What it actually looks like | `x-export-frames` |
@@ -21,14 +21,19 @@ the steps that apply.
 not later on someone else's machine. Load with the dependencies the package
 declares and nothing else.
 
-## 4. package-lint without touching the user's packages
+## 4. Linters without touching the user's packages
+
+Install package-lint (MELPA) and relint (GNU ELPA) into a directory of
+your own, never into the user's `~/.emacs.d`:
 
 ```sh
 D=$(mktemp -d)
 emacs --batch -Q --eval "(progn (setq package-user-dir \"$D\") (package-initialize)
-  (package-refresh-contents) (package-install 'package-lint))"
+  (add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))
+  (package-refresh-contents) (package-install 'package-lint) (package-install 'relint))"
 emacs --batch -Q --eval "(progn (setq package-user-dir \"$D\") (package-initialize) (require 'package-lint))" \
   -L . --eval '(setq package-lint-main-file "mypkg.el")' -f package-lint-batch-and-exit *.el
+ELISP_AGENT_PACKAGE_DIR=$D elisp-agent --packages -L . check --regexp *.el
 ```
 
 ## 5. Real key sequences in batch
@@ -63,6 +68,12 @@ session**. Rules:
   `execute-kbd-macro` inside the evaluated form for real key handling.
 - For anything disruptive, start a separate server: `emacs -Q --daemon=test`
   and `emacsclient -s test --eval ...`; stop it with `(kill-emacs)`.
+- Run tests in batch, not here. `ert-run-tests-batch-and-exit` refuses
+  outside batch, and tests that do run in a live Emacs leave their state
+  behind (definitions, hooks, buffers). Some published skills tell agents
+  to do *everything* through `emacsclient`; that is convenient but makes
+  results depend on the user's session, and a crash or hang takes the
+  user's Emacs with it.
 
 ## 7. Screenshots
 
@@ -78,6 +89,36 @@ which an agent that reads images can then inspect:
 
 Use it to check layout, alignment, faces and highlights: things a test of
 the buffer text cannot see.
+
+## When something fails
+
+- **Get the backtrace.** `elisp-agent eval` prints only the error. A
+  plain batch run prints the whole call stack, which shows where it
+  happened:
+
+  ```
+  $ emacs --batch -Q -L . -l mypkg --eval '(mypkg-outer)'
+  Error: wrong-type-argument (listp 5)
+    car(5)
+    mypkg-inner(5)
+    mypkg-outer()
+  ```
+
+- **Read the error symbol**, then look up the cause:
+
+  | Error | Usual cause |
+  |---|---|
+  | `void-function foo` | Typo, invented function, its library is not loaded (`require`), or `(foo)` where `foo` is a variable holding a function (use `funcall`) |
+  | `void-variable foo` | Typo, a missing `let`, or a quoted symbol written without `'` |
+  | `wrong-number-of-arguments` | Check the signature with `describe` |
+  | `wrong-type-argument listp 5` | A value of the wrong type; the predicate (`listp`) says what was expected |
+  | `invalid-function ("a")` | A list without its quote: `("a" "b")` instead of `'("a" "b")`, or a non-function given to `funcall`/`mapcar` |
+  | `end-of-file` / `scan-error` | Unbalanced parentheses or an unterminated string: run `check` |
+  | `args-out-of-range` | A position or index outside the buffer, string or narrowing |
+
+- **Trace calls** without editing the code: `(trace-function 'mypkg-f)`,
+  then read the `*trace-output*` buffer (in batch:
+  `(with-current-buffer "*trace-output*" (princ (buffer-string)))`).
 
 ## Always
 

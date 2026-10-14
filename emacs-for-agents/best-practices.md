@@ -67,6 +67,13 @@ what `package-lint` and `checkdoc` enforce. Skeletons are in
   period. `y-or-n-p` and `yes-or-no-p` prompts end with a question mark and a
   space. Destructive actions on several files or directories ask with
   `yes-or-no-p`, and say what will happen.
+- Quote functions with `#'` (`(mapcar #'car list)`) so the compiler checks
+  that they exist. Name unused arguments with a leading underscore
+  (`_event`). Use `dolist` or `mapc`, not `mapcar`, when only side effects
+  matter.
+- Add **named functions** to hooks, not lambdas: a lambda cannot be removed
+  again with `remove-hook`. Whatever a mode adds (hooks, advice, timers),
+  it removes when it is turned off.
 - Keep functions short and give each one job. Prefer `let`, `when`,
   `unless`, `cond`, `dolist`, `pcase` with simple patterns; reach for
   `cl-loop` only when it is clearly shorter.
@@ -94,6 +101,28 @@ what `package-lint` and `checkdoc` enforce. Skeletons are in
   that Emacs runs with only the local value (like
   `ediff-after-quit-hook-internal`), include the global value too.
 
+## Regular expressions
+
+Emacs regexps are not Perl's. Models trained mostly on other languages
+write Perl syntax that silently matches something else.
+
+| Perl habit | Emacs | Note |
+|---|---|---|
+| `\d` | `[0-9]` or `[[:digit:]]` | `\d` matches the letter `d` |
+| `\s` for whitespace | `[[:space:]]` or `\s-` | `\s` is a syntax-class prefix |
+| `(a\|b)`, `(?:...)` | `\(a\|b\)`, `\(?:...\)` | Plain parentheses are literal |
+| `^`, `$` for the whole string | `` \` ``, `\'` | `^` and `$` match at every newline |
+| `"\."` in a string | `"\\."` | Lisp strings need the backslash doubled |
+
+- Searches and `string-match` ignore case unless you bind
+  `case-fold-search` to nil: `(let ((case-fold-search nil)) ...)`.
+- Use `regexp-quote` for literal text, and `rx` for anything long:
+  `(rx bos (+ digit) "." (+ digit) eos)` is hard to get wrong.
+- `string-match` and `re-search-forward` change the match data; use
+  `string-match-p` when you only test, and `save-match-data` in functions
+  that others call between a match and `match-string`.
+- `elisp-agent check --regexp` runs relint, which finds most of these.
+
 ## Files and processes
 
 - Build file names with `expand-file-name` and `file-name-concat`, not
@@ -120,5 +149,7 @@ T=emacs-for-agents/tools/elisp-agent
 $T check --doc *.el          # structure, zero warnings, checkdoc
 $T indent *.el               # standard indentation
 $T -L . test test/*-test.el  # tests
-# MELPA: package-lint (see verification.md)
+# with relint and package-lint installed (verification.md, step 4):
+$T --packages check --regexp *.el
+# MELPA: package-lint
 ```

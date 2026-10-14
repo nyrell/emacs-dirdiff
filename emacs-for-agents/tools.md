@@ -6,7 +6,7 @@ running Emacs. Output is one finding per line, `FILE:LINE: message`. The exit
 status is 0 when all is well and 1 otherwise, so an agent can branch on it.
 
 ```
-elisp-agent check [--doc] [--allow-warnings] FILE...
+elisp-agent check [--doc] [--regexp] [--allow-warnings] FILE...
 elisp-agent forms FILE
 elisp-agent indent [--fix] FILE...
 elisp-agent describe SYMBOL...
@@ -34,11 +34,26 @@ use another Emacs binary.
    f.el:7: missing closing paren(s): this form is not closed before the end of the file: (defun my-b
    ```
 
-   Parentheses inside strings, comments and `?\(` are understood.
+   Parentheses inside strings, comments and `?\(` are understood. Each
+   error comes with a **hint from the indentation**: models indent by
+   intention more reliably than they count parentheses (the idea behind
+   [parenmedic][pm] and [Parinfer][pi]), so the first line whose written
+   indentation disagrees with the parens is usually just after the mistake:
+
+   ```
+   f.el:1: missing 1 closing paren(s) in the form starting at line 1: (defun a ... (line 7 starts a new top-level form inside it) Hint: line 3 is indented 4, but the parens put it at 8, so a ) is probably missing at the end of the code before line 3.
+   ```
+
+   The hint is only as good as the indentation, so keep it right.
 2. **Byte-compile** (only if the structure is fine). Shows the compiler's
    warnings: unknown functions, wrong number of arguments, free variables,
    unused values. **Warnings fail the check** unless `--allow-warnings`.
 3. **checkdoc** with `--doc`: docstring and comment style (what MELPA checks).
+4. **relint** with `--regexp`: mistakes in regular expressions, such as
+   Perl's `\s+` and `\d`, ranges like `[a-z_-.]`, and `^` where a file
+   name needs `` \` ``. relint is a GNU ELPA package; install it once
+   (see [verification.md](verification.md#4-linters-without-touching-the-users-packages))
+   and add `--packages`.
 
 ## forms
 
@@ -133,3 +148,6 @@ model in Emacs (gptel, ellama) or a local model with function calling,
 expose `check`, `describe`, `builtins` and `eval` as tools that run the
 script and return its output, and tell the model to call `check` after every
 edit and `describe` before using an unfamiliar function.
+
+[pm]: https://github.com/shcv/parenmedic
+[pi]: https://shaunlebron.github.io/parinfer/

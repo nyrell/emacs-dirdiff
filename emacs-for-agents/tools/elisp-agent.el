@@ -4,8 +4,8 @@
 
 ;; Run through the `elisp-agent' shell script; see ../tools.md.
 ;;
-;;   elisp-agent check [--doc] [--allow-warnings] FILE...
-;;                                   structure, byte-compile, checkdoc
+;;   elisp-agent check [--doc] [--regexp] [--allow-warnings] FILE...
+;;                                   structure, byte-compile, checkdoc, relint
 ;;   elisp-agent forms FILE                        top-level forms and their lines
 ;;   elisp-agent indent [--fix] FILE...            lines Emacs would indent differently
 ;;   elisp-agent describe SYMBOL...                exists? arguments, docstring
@@ -73,8 +73,43 @@
     (goto-char pos)
     (buffer-substring-no-properties
      pos (min (pos-eol) (save-excursion (forward-char 1)
-                                        (ignore-errors (forward-sexp 2))
+                                        (ignore-errors (forward-sexp 1) (forward-sexp 1))
                                         (point))))))
+
+(defun elisp-agent--indent-hint (beg end &optional missing)
+  "Say where the indentation between BEG and END disagrees with the parens.
+Models indent by intention more reliably than they count parens, so
+the first disagreement is usually just after the mistake.  Return a
+sentence starting with a space.  If the indentation agrees, return
+\"\", or with MISSING, say the paren belongs at the end of the code."
+  (let* ((text (buffer-substring-no-properties beg end))
+         (first-line (elisp-agent--line beg))
+         (before (split-string text "\n"))
+         (after (with-temp-buffer
+                  (insert text)
+                  (emacs-lisp-mode)
+                  (setq indent-tabs-mode nil) ; a tab would count as one column
+                  (let ((inhibit-message t))
+                    (indent-region (point-min) (point-max)))
+                  (split-string (buffer-string) "\n"))))
+    (or (cl-loop for old in before
+                 for new in after
+                 for line from first-line
+                 for written = (- (length old) (length (string-trim-left old)))
+                 for expected = (- (length new) (length (string-trim-left new)))
+                 unless (or (= written expected) (string-blank-p old))
+                 return (format " Hint: line %d is indented %d, but the parens put it at %d, so %s."
+                                line written expected
+                                (if (> expected written)
+                                    (format "a ) is probably missing at the end of the code before line %d" line)
+                                  (format "there is probably a ) too many before line %d" line))))
+        (if (not missing)
+            ""
+          (format " Hint: the indentation agrees with the parens, so the ) is probably missing at the end of line %d."
+                  (save-excursion
+                    (goto-char end)
+                    (skip-chars-backward " \t\n")
+                    (elisp-agent--line (point))))))))
 
 (defun elisp-agent--check-structure (file)
   "Report unbalanced parentheses in FILE, in words.  Return non-nil if OK."
@@ -93,9 +128,10 @@
             (let ((outer (car (nth 9 ppss))))
               (setq ok nil)
               (elisp-agent--fail
-               "%s:%d: missing %d closing paren(s) in the form starting at line %d: %s ... (line %d starts a new top-level form inside it)"
+               "%s:%d: missing %d closing paren(s) in the form starting at line %d: %s ... (line %d starts a new top-level form inside it)%s"
                file (elisp-agent--line outer) (nth 0 ppss) (elisp-agent--line outer)
-               (elisp-agent--form-name outer) (elisp-agent--line pos))))))
+               (elisp-agent--form-name outer) (elisp-agent--line pos)
+               (elisp-agent--indent-hint outer pos t))))))
       ;; Walk the top-level forms; a scan error pinpoints the rest.
       (goto-char (point-min))
       (let ((previous nil))
@@ -104,20 +140,32 @@
             (cond
              ((looking-at-p ")")
               (setq ok nil)
-              (elisp-agent--fail "%s:%d: extra closing paren%s"
+              (elisp-agent--fail "%s:%d: extra closing paren%s%s"
                                  file (elisp-agent--line start)
-                                 (if previous
-                                     (format "; the form starting at line %d has one ) too many: %s"
-                                             (elisp-agent--line previous)
-                                             (elisp-agent--form-name previous))
-                                   "")))
+                                 (cond
+                                  ((null previous) "")
+                                  ;; An indented form at top level: a form
+                                  ;; above it was closed too early.
+                                  ((save-excursion (goto-char previous) (not (bolp)))
+                                   (format "; an earlier form was closed too early, so the indented form at line %d ended up at top level: %s"
+                                           (elisp-agent--line previous)
+                                           (elisp-agent--form-name previous)))
+                                  (t
+                                   (format "; the form starting at line %d has one ) too many: %s"
+                                           (elisp-agent--line previous)
+                                           (elisp-agent--form-name previous))))
+                                 (elisp-agent--indent-hint
+                                  (save-excursion
+                                    (if (re-search-backward "^(" nil t) (point) (point-min)))
+                                  start)))
              ((condition-case nil (progn (forward-sexp 1) t) (scan-error nil))
               (setq previous start))
              (t
               (setq ok nil)
-              (elisp-agent--fail "%s:%d: missing closing paren(s): this form is not closed before the end of the file: %s"
+              (elisp-agent--fail "%s:%d: missing closing paren(s): this form is not closed before the end of the file: %s%s"
                                  file (elisp-agent--line start)
-                                 (elisp-agent--form-name start)))))))
+                                 (elisp-agent--form-name start)
+                                 (elisp-agent--indent-hint start (point-max) t)))))))
       ok)))
 
 (defun elisp-agent--byte-compile (file allow-warnings)
@@ -148,15 +196,32 @@ Warnings count as failures unless ALLOW-WARNINGS."
     (dolist (finding (nreverse findings))
       (elisp-agent--fail "%s (checkdoc)" (string-trim finding)))))
 
+(declare-function relint-buffer "ext:relint" (buffer))
+
+(defun elisp-agent--relint (file)
+  "Report regexp mistakes in FILE, as found by relint."
+  (if (not (require 'relint nil t))
+      (elisp-agent--fail "%s: relint is not installed; install it from GNU ELPA and add --packages" file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (emacs-lisp-mode)
+      ;; A diagnostic is a vector: [MESSAGE BEG-POS END-POS POS-TYPE STRING ...].
+      (dolist (diag (relint-buffer (current-buffer)))
+        (elisp-agent--fail "%s:%d: %s%s (relint)" file
+                           (elisp-agent--line (aref diag 1)) (aref diag 0)
+                           (if (aref diag 4) (format ": %S" (aref diag 4)) ""))))))
+
 (defun elisp-agent-check (args)
   "Check the files in ARGS."
   (let ((doc (member "--doc" args))
+        (regexp (member "--regexp" args))
         (allow-warnings (member "--allow-warnings" args)))
     (dolist (file (cl-remove-if (lambda (a) (string-prefix-p "--" a)) args))
       ;; Compiling a file with broken structure only adds noise.
       (when (elisp-agent--check-structure file)
         (elisp-agent--byte-compile file allow-warnings)
-        (when doc (elisp-agent--checkdoc file))))))
+        (when doc (elisp-agent--checkdoc file))
+        (when regexp (elisp-agent--relint file))))))
 
 ;;;; forms
 
@@ -195,6 +260,7 @@ With FIX, write FILE back indented instead."
   (with-temp-buffer
     (insert-file-contents file)
     (emacs-lisp-mode)
+    (setq indent-tabs-mode nil)         ; count columns, and never write tabs
     ;; Macros only indent correctly once they are defined: load the
     ;; required libraries and evaluate the file's own macros.
     (let ((load-path (cons (file-name-directory (expand-file-name file)) load-path)))
