@@ -321,6 +321,28 @@ CONTENT is a string, `dir' for an empty directory or (link . TARGET)."
       (dirdiff-test--goto "r")
       (should-error (dirdiff-copy-to-right) :type 'user-error))))
 
+(ert-deftest dirdiff-test-replace-asks-for-confirmation ()
+  (dirdiff-test--with-dirs '(("f" . "new") ("g" . "g")) '(("f" . "old"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (let (prompts)
+        (cl-letf (((symbol-function 'yes-or-no-p) (lambda (p) (push p prompts) nil))
+                  ((symbol-function 'y-or-n-p) (lambda (p) (push p prompts) nil)))
+          (let ((delete-by-moving-to-trash t))
+            (dirdiff-test--goto "f")
+            (dirdiff-copy-to-right))
+          (let ((delete-by-moving-to-trash nil))
+            (dirdiff-copy-to-right))
+          ;; Nothing is in the way: the quick question.
+          (dirdiff-test--goto "g")
+          (dirdiff-copy-to-right))
+        (should (equal (nreverse prompts)
+                       '("Replace f on the right side?  The current file will be moved to the trash. "
+                         "Replace f on the right side?  The current file will be deleted permanently. "
+                         "Copy g to the right side? ")))
+        ;; Declined, so nothing changed.
+        (should (equal (dirdiff-test--read (expand-file-name "f" right)) "old"))
+        (should-not (file-exists-p (expand-file-name "g" right)))))))
+
 ;; Bug: copying onto a symlink wrote into the file it points to, even
 ;; outside the compared tree.
 (ert-deftest dirdiff-test-copy-replaces-symlink ()
@@ -494,6 +516,17 @@ a.txt, changes whitespace in ws.txt, deletes dir/g and adds new."
     (let ((s (dirdiff-test--git-session repo "HEAD" nil)))
       (should (eq (dirdiff-test--status s "lnk") 'same))
       (should (eq (dirdiff-test--status s "bin2") 'same)))))
+
+;; Bug: a change of only the executable bit showed as changed, and RET
+;; ran an ediff that found no differences.
+(ert-deftest dirdiff-test-git-mode-only-change ()
+  (dirdiff-test--with-repo
+    (set-file-modes (expand-file-name "same.txt" repo) #o755)
+    (dirdiff-test--in-buffer (dirdiff-test--git-session repo "HEAD" nil)
+      (dirdiff-test--goto "same.txt")
+      (should (eq (dirdiff-test--status dirdiff--session "same.txt") 'changed))
+      (should (equal (dirdiff-test--messages #'dirdiff-open)
+                     '("The contents are identical; only the file mode differs (executable on the right)"))))))
 
 (ert-deftest dirdiff-test-git-parse-range ()
   (dirdiff-test--with-repo

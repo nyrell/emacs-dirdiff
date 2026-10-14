@@ -827,10 +827,27 @@ If the file exists on one side only, visit it."
                         ((or (dirdiff--binary-file-p (dirdiff--local-file node 'left))
                              (dirdiff--binary-file-p (dirdiff--local-file node 'right)))
                          "Binary files"))))
-        (if what
-            (message "%s are %s" what (if (eq (dirdiff-node-status node) 'same)
-                                          "identical" "different"))
-          (dirdiff--ediff node)))))))
+        (cond
+         (what
+          (message "%s are %s" what (if (eq (dirdiff-node-status node) 'same)
+                                        "identical" "different")))
+         ;; git also reports changes of the executable bit.
+         ((and (eq (dirdiff-node-status node) 'changed)
+               (dirdiff--equal-p (dirdiff--local-file node 'left)
+                                 (dirdiff--local-file node 'right)
+                                 (list (dirdiff-entry-size l) (dirdiff-entry-size r))
+                                 "cmp" '("-s") #'identity))
+          (message "The contents are identical; only the file mode differs (%s)"
+                   (if (dirdiff--executable-p r)
+                       "executable on the right"
+                     "executable on the left")))
+         (t (dirdiff--ediff node))))))))
+
+(defun dirdiff--executable-p (entry)
+  "Non-nil if ENTRY is an executable file."
+  (if (dirdiff-entry-mode entry)
+      (equal (dirdiff-entry-mode entry) "100755")
+    (file-executable-p (dirdiff-entry-file entry))))
 
 (defun dirdiff-mouse-open (event)
   "Open the entry clicked on with EVENT, like `dirdiff-open'."
@@ -878,11 +895,7 @@ If it only exists on the other side, visit that."
                          existing (eq (dirdiff-entry-type existing) 'file)
                          (file-symlink-p dest))))
       (user-error "Only files linked to the working tree can be changed here"))
-    (when (y-or-n-p (format "%s %s%s to the %s side? "
-                            (if existing "Replace" "Copy")
-                            (dirdiff-node-rel node)
-                            (if (dirdiff--entry-dir-p entry) "/" "")
-                            to))
+    (when (dirdiff--confirm-copy node entry existing to dest through-links)
       ;; Replace what is there, so that both sides end up identical
       ;; (a symlink is replaced, not written through), except where
       ;; writing through links is the point.
@@ -893,6 +906,26 @@ If it only exists on the other side, visit that."
                               entry (dirdiff-node-rel node) dest)
       (dirdiff--refresh-node dirdiff--session node)
       (dirdiff--render))))
+
+(defun dirdiff--confirm-copy (node entry existing to dest through-links)
+  "Ask whether to copy ENTRY of NODE to side TO, at local file DEST.
+EXISTING is what is there now.  Replacing something asks with
+`yes-or-no-p' and says what happens to the current version."
+  (let ((name (concat (dirdiff-node-rel node) (if (dirdiff--entry-dir-p entry) "/" ""))))
+    (cond
+     ((not existing)
+      (y-or-n-p (format "Copy %s to the %s side? " name to)))
+     (through-links
+      (yes-or-no-p (format "Overwrite %s with the %s version? "
+                           (abbreviate-file-name (file-truename dest))
+                           (dirdiff--other-side to))))
+     (t
+      (yes-or-no-p (format "Replace %s on the %s side?  The current %s will be %s. "
+                           name to
+                           (if (dirdiff--entry-dir-p existing) "directory" "file")
+                           (if delete-by-moving-to-trash
+                               "moved to the trash"
+                             "deleted permanently")))))))
 
 (defun dirdiff-copy-to-right ()
   "Copy the current file or directory from the left side to the right side."
