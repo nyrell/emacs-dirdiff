@@ -38,6 +38,14 @@ Not on MELPA yet. Clone the repository and add to your init file:
 (require 'dirdiff-git)
 ```
 
+Or load [`examples/dirdiff-init.el`](examples/dirdiff-init.el), which sets
+up everything below (the magit and vc keys, and `C-c =` in Dired) in one
+line:
+
+```elisp
+(load "/path/to/emacs-dirdiff/examples/dirdiff-init.el")
+```
+
 ## Usage
 
 | Command | Compares |

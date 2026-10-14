@@ -16,6 +16,8 @@
 ;; Comparisons started from magit open in a new, maximized frame and
 ;; `q' deletes it again; see the end of this file to change that.
 ;;
+;; For a ready-made setup that you only need to load, see dirdiff-init.el.
+;;
 ;; If you already add suffixes with these keys (for example from a
 ;; magit-difftool.el), remove those first, or use other keys below.
 
