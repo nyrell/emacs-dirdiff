@@ -63,7 +63,7 @@ it.
 | Key | Action |
 |---|---|
 | `TAB`, click | switch active side |
-| `RET`, double-click | ediff the file pair / expand or collapse the directory / visit a one-sided file in a new frame |
+| `RET`, double-click | ediff the file pair (a file on one side only is compared with an empty file) / expand or collapse the directory |
 | `n`, `p` | next / previous difference (expands directories as needed) |
 | `^` | parent directory |
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
@@ -73,6 +73,7 @@ it.
 | `g` | compare again |
 | `>`, `<` | copy the entry to the right / left side (directories are replaced) |
 | `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
+| `v` | visit the file on the active side in this window |
 | `o` | visit the file on the active side in another window |
 | `?` | menu with all commands |
 | `q` | quit |
@@ -184,8 +185,6 @@ and [`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
 - `dirdiff-new-frame` — `magit` (default: new frame when started from
   magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`
-- `dirdiff-visit-in-new-frame` — `t` (default) visits a file that exists
-  on one side only in a new frame, `nil` in another window
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
   `dirdiff-conflict`, `dirdiff-active-cell`
 

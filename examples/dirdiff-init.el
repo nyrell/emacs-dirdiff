@@ -69,7 +69,6 @@
 
 ;; Options; the values shown are the defaults.
 ;; (setq dirdiff-new-frame 'magit)          ; t: always a new frame, nil: never
-;; (setq dirdiff-visit-in-new-frame t)      ; one-sided files; nil: other window
 ;; (setq dirdiff-frame-parameters '((fullscreen . maximized))) ; nil: normal size
 ;; (setq dirdiff-hide-identical nil)        ; directories; git always starts hidden
 ;; (setq dirdiff-ignore-whitespace nil)

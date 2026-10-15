@@ -109,13 +109,6 @@ buffer, which leaves magit's windows as they were.  Quitting with
                  (const :tag "New frame" t)
                  (const :tag "New frame when started from magit" magit)))
 
-(defcustom dirdiff-visit-in-new-frame t
-  "Whether \\<dirdiff-mode-map>\\[dirdiff-open] visits a one-sided file in a new frame.
-A file that exists on one side only cannot be diffed, so it is
-visited instead: in a new frame if this is non-nil, otherwise in
-another window."
-  :type 'boolean)
-
 (defcustom dirdiff-frame-parameters '((fullscreen . maximized))
   "Frame parameters for the frames made according to `dirdiff-new-frame'."
   :type '(alist :key-type symbol :value-type sexp))
@@ -813,10 +806,21 @@ With BACKWARD, move to the previous one."
                          entry (dirdiff-node-rel node))))
 
 (defun dirdiff--ediff (node)
-  "Run ediff on the files of NODE; compare NODE again when ediff quits."
+  "Run ediff on the files of NODE; compare NODE again when ediff quits.
+A side where the file is missing is shown as an empty, read-only file."
   (require 'ediff)
-  (let* ((left (dirdiff--local-file node 'left))
-         (right (dirdiff--local-file node 'right))
+  (let* ((absent-dir (unless (and (dirdiff-node-left node) (dirdiff-node-right node))
+                       (make-temp-file "dirdiff-absent-" t)))
+         (absent (and absent-dir
+                      ;; The same name, so ediff picks the same major mode;
+                      ;; the directory makes the buffer name end in <missing>.
+                      (let ((file (expand-file-name (dirdiff-node-name node)
+                                                    (expand-file-name "missing" absent-dir))))
+                        (make-directory (file-name-directory file))
+                        (write-region "" nil file nil 'silent)
+                        file)))
+         (left (or (dirdiff--local-file node 'left) absent))
+         (right (or (dirdiff--local-file node 'right) absent))
          (buffer (current-buffer))
          (config (current-window-configuration))
          (ediff-diff-options
@@ -826,12 +830,18 @@ With BACKWARD, move to the previous one."
          (after-quit
           (lambda ()
             (set-window-configuration config)
+            (when absent
+              (when-let* ((b (get-file-buffer absent)))
+                (kill-buffer b))
+              (delete-directory absent-dir t))
             (when (buffer-live-p buffer)
               (with-current-buffer buffer
                 (dirdiff--refresh-node dirdiff--session node)
                 (dirdiff--render))))))
     (ediff-files left right
                  (list (lambda ()
+                         (when-let* ((b (and absent (get-file-buffer absent))))
+                           (with-current-buffer b (setq buffer-read-only t)))
                          ;; ediff ignores the global value of this hook
                          ;; once it has a local one, so include it.
                          (setq-local ediff-after-quit-hook-internal
@@ -841,8 +851,7 @@ With BACKWARD, move to the previous one."
 
 (defun dirdiff-open ()
   "Diff the files on the current row, or expand/collapse the directory.
-If the file exists on one side only, visit it, in a new frame if
-`dirdiff-visit-in-new-frame' is non-nil."
+A file that exists on one side only is diffed with an empty file."
   (interactive)
   (let* ((node (dirdiff--node-at-point))
          (l (dirdiff-node-left node))
@@ -851,21 +860,22 @@ If the file exists on one side only, visit it, in a new frame if
      ((dirdiff--node-dir-p node)
       (dirdiff--set-open node (not (dirdiff--open-p node)))
       (dirdiff--render))
-     ((not (and l r)) (dirdiff--visit (if dirdiff-visit-in-new-frame
-                                          #'find-file-other-frame
-                                        #'find-file-other-window)))
      (t
-      (let ((what (cond ((memq 'module (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
-                         "Submodules")
-                        ((memq 'link (list (dirdiff-entry-type l) (dirdiff-entry-type r)))
-                         "Symbolic links")
-                        ((or (dirdiff--binary-file-p (dirdiff--local-file node 'left))
-                             (dirdiff--binary-file-p (dirdiff--local-file node 'right)))
-                         "Binary files"))))
+      (let* ((types (mapcar #'dirdiff-entry-type (delq nil (list l r))))
+             (what (cond ((memq 'module types) "Submodule")
+                         ((memq 'link types) "Symbolic link")
+                         ((cl-some (lambda (side)
+                                     (when-let* ((file (dirdiff--local-file node side)))
+                                       (dirdiff--binary-file-p file)))
+                                   '(left right))
+                          "Binary file"))))
         (cond
          (what
-          (message "%s are %s" what (if (eq (dirdiff-node-status node) 'same)
-                                        "identical" "different")))
+          (message "%s" (pcase (dirdiff-node-status node)
+                          ('same (format "%ss are identical" what))
+                          ('left (format "%s on the left only" what))
+                          ('right (format "%s on the right only" what))
+                          (_ (format "%ss are different" what)))))
          ;; git also reports changes of the executable bit.
          ((and (eq (dirdiff-node-status node) 'changed)
                (dirdiff--equal-p (dirdiff--local-file node 'left)
@@ -897,6 +907,12 @@ If the file exists on one side only, visit it, in a new frame if
                    dirdiff--side
                  (dirdiff--other-side dirdiff--side))))
     (funcall find-file (dirdiff--local-file node side))))
+
+(defun dirdiff-find-file ()
+  "Visit the file or directory on the active side in this window.
+If it only exists on the other side, visit that."
+  (interactive)
+  (dirdiff--visit #'find-file))
 
 (defun dirdiff-find-file-other-window ()
   "Visit the file or directory on the active side in another window.
@@ -1019,6 +1035,7 @@ If the comparison has its own frame, delete it."
     ("*" "Expand changed" dirdiff-expand-changed :transient t)]
    ["Open"
     ("RET" "Ediff / toggle directory" dirdiff-open)
+    ("v" "Visit" dirdiff-find-file)
     ("o" "Visit in other window" dirdiff-find-file-other-window)]]
   [["Show and compare"
     ("=" "Hide identical (toggle)" dirdiff-toggle-hide-identical :transient t)
@@ -1040,6 +1057,7 @@ If the comparison has its own frame, delete it."
   "<mouse-1>" #'dirdiff-mouse-select
   "<double-mouse-1>" #'dirdiff-mouse-open
   "<mouse-2>" #'dirdiff-mouse-open
+  "v" #'dirdiff-find-file
   "o" #'dirdiff-find-file-other-window
   "n" #'dirdiff-next-difference
   "p" #'dirdiff-previous-difference
@@ -1065,6 +1083,7 @@ If the comparison has its own frame, delete it."
     ["Switch side" dirdiff-switch-side]
     "---"
     ["Ediff / toggle directory" dirdiff-open]
+    ["Visit" dirdiff-find-file]
     ["Visit in other window" dirdiff-find-file-other-window]
     "---"
     ["Expand all" dirdiff-expand-all]

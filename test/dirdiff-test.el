@@ -372,6 +372,7 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
 
 ;; Bug: RET on two symlinks to directories ran ediff on directories.
 (defvar ediff-quit-hook)
+(defvar ediff-after-quit-hook-internal)
 
 ;; Request: start from the command line like meld, exiting on quit.
 (ert-deftest dirdiff-test-command-line ()
@@ -404,26 +405,52 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
       (setq command-line-args-left '("left"))
       (should-error (dirdiff-command-line)))))
 
-;; Requests: a file on one side only is visited in its own frame (an
-;; option), and its missing side is struck through.
+;; Requests: a file on one side only is diffed against an empty file
+;; (it used to be visited), and its missing side is struck through.
 (ert-deftest dirdiff-test-one-sided-file ()
-  (dirdiff-test--with-dirs '(("only" . "x")) '()
+  (dirdiff-test--with-dirs '(("only.el" . "x") ("bin" . "\0")) '()
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
-      (dirdiff-test--goto "only")
+      (dirdiff-test--goto "only.el")
       (beginning-of-line)
       (should (eq (get-text-property (1- (search-forward "only")) 'face) 'dirdiff-new))
       (should (eq (get-text-property (1- (search-forward "only")) 'face) 'dirdiff-absent))
       (should (face-attribute 'dirdiff-absent :strike-through))
+      (require 'ediff)                  ; or loading it would undo the mock
+      (let (args)
+        (cl-letf (((symbol-function 'ediff-files) (lambda (&rest a) (setq args a))))
+          (dirdiff-open))
+        (pcase-let ((`(,a ,b ,startup) args))
+          (should (equal a (expand-file-name "only.el" left)))
+          (should (equal (file-name-nondirectory b) "only.el"))
+          (should (equal (dirdiff-test--read b) ""))
+          ;; Quitting ediff removes the empty file.
+          (with-temp-buffer
+            (mapc #'funcall startup)
+            (funcall (car (last ediff-after-quit-hook-internal))))
+          (should-not (file-exists-p b))))
+      (dirdiff-test--goto "bin")
+      (should (equal (dirdiff-test--messages #'dirdiff-open)
+                     '("Binary file on the left only"))))))
+
+;; Request: v visits in this window, o in the other one.
+(ert-deftest dirdiff-test-visit ()
+  (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2") ("new" . "n"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
       (let (visited)
-        (cl-letf (((symbol-function 'find-file-other-frame)
-                   (lambda (f) (push (cons 'frame f) visited)))
+        (cl-letf (((symbol-function 'find-file)
+                   (lambda (f &rest _) (push (cons 'this f) visited)))
                   ((symbol-function 'find-file-other-window)
-                   (lambda (f) (push (cons 'window f) visited))))
-          (dirdiff-open)
-          (let ((dirdiff-visit-in-new-frame nil))
-            (dirdiff-open)))
-        (should (equal visited `((window . ,(expand-file-name "only" left))
-                                 (frame . ,(expand-file-name "only" left)))))))))
+                   (lambda (f &rest _) (push (cons 'other f) visited))))
+          (dirdiff-test--goto "f")
+          (execute-kbd-macro "v")
+          (execute-kbd-macro "o")
+          ;; Missing on the active side: visit the other one.
+          (dirdiff-test--goto "new")
+          (execute-kbd-macro "v"))
+        (should (equal (reverse visited)
+                       `((this . ,(expand-file-name "f" left))
+                         (other . ,(expand-file-name "f" left))
+                         (this . ,(expand-file-name "new" right)))))))))
 
 (ert-deftest dirdiff-test-open-links ()
   (dirdiff-test--with-dirs '(("d/x" . "x") ("l" link . "d")) '(("e/x" . "x") ("l" link . "e"))
