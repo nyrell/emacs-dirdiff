@@ -1,0 +1,20 @@
+#!/bin/sh
+# dirdiff -- compare two files or directories in Emacs, like meld.
+#
+#   dirdiff LEFT RIGHT
+#
+# Link it into a directory on your PATH, so it finds dirdiff.el here:
+#   ln -s /path/to/emacs-dirdiff/examples/dirdiff ~/bin/dirdiff
+# or copy it and set DIRDIFF_DIR to the emacs-dirdiff directory.
+# A new Emacs starts and exits when the comparison is quit.  Set
+# DIRDIFF_EMACS for another Emacs command, e.g. "emacs -nw".
+
+script=$(readlink -f "$0")
+dir=${DIRDIFF_DIR:-$(dirname "$script")/..}
+
+if [ $# -ne 2 ]; then
+    echo "usage: dirdiff LEFT RIGHT" >&2
+    exit 2
+fi
+
+exec ${DIRDIFF_EMACS:-emacs} -L "$dir" -l dirdiff -f dirdiff-command-line "$1" "$2"

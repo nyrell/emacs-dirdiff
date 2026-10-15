@@ -1,0 +1,21 @@
+# dirdiff as the tool for `git difftool --dir-diff'.
+#
+# Copy this into ~/.gitconfig with your path to emacs-dirdiff, or set
+# the same values with git config --global.  Then:
+#
+#   git difftool -d HEAD~3         # HEAD~3 vs the working tree
+#   git difftool -d A..B           # two commits
+#   git dd A..B                    # the same, with the alias below
+#
+# If Emacs runs a server (M-x server-start), the comparison opens in a
+# new frame there; otherwise a new Emacs starts and exits on `q'.
+# dirdiff compares directories only, so always use -d.
+
+[diff]
+	tool = dirdiff
+[difftool]
+	prompt = false
+[difftool "dirdiff"]
+	cmd = /path/to/emacs-dirdiff/bin/dirdiff-difftool \"$LOCAL\" \"$REMOTE\"
+[alias]
+	dd = difftool -d --tool=dirdiff

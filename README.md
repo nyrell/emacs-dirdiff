@@ -146,6 +146,9 @@ git config --global difftool.prompt false
 git difftool -d --tool=dirdiff HEAD~3
 ```
 
+[`examples/git-difftool.gitconfig`](examples/git-difftool.gitconfig) has
+the same settings for `~/.gitconfig`, plus a `git dd` alias.
+
 If an Emacs server is running (`M-x server-start`), the comparison opens
 in a new frame there and the script waits until you quit it. Otherwise it starts a new
 Emacs that exits when you quit the comparison. Set `DIRDIFF_EMACSCLIENT` or
@@ -156,6 +159,19 @@ right side is your working tree, git fills it with links to your files: copying
 a file onto one of those, or saving it in ediff, changes your working tree.
 Adding or deleting files is refused there, because git would not pass the change
 on; use `M-x dirdiff-git` for that.
+
+## Command line
+
+Like meld, from a shell:
+
+```sh
+emacs -L /path/to/emacs-dirdiff -l dirdiff -f dirdiff-command-line LEFT RIGHT
+```
+
+LEFT and RIGHT are two directories or two files. A new Emacs starts and
+exits when you quit the comparison. Ready-made launchers:
+[`examples/dirdiff`](examples/dirdiff) (shell; link it into your `PATH`)
+and [`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
 
 ## Customization
 

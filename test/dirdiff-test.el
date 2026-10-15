@@ -371,6 +371,39 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
     messages))
 
 ;; Bug: RET on two symlinks to directories ran ediff on directories.
+(defvar ediff-quit-hook)
+
+;; Request: start from the command line like meld, exiting on quit.
+(ert-deftest dirdiff-test-command-line ()
+  (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2"))
+    (let ((command-line-default-directory root)
+          (command-line-args-left '("left" "right" "--next"))
+          (ediff-quit-hook nil)
+          scheduled compared)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_time _repeat fn &rest _)
+                   (when (eq fn #'save-buffers-kill-emacs) (push fn scheduled)))))
+        (let ((buffer (dirdiff-command-line)))
+          (should (equal command-line-args-left '("--next")))
+          (should (buffer-live-p buffer))
+          (should-not scheduled)
+          (kill-buffer buffer)
+          (should (equal scheduled '(save-buffers-kill-emacs)))))
+      ;; Files go to ediff, and quitting ediff exits too.
+      (setq command-line-args-left '("left/f" "right/f") scheduled nil)
+      (cl-letf (((symbol-function 'ediff-files)
+                 (lambda (&rest files) (setq compared files)))
+                ((symbol-function 'run-at-time)
+                 (lambda (_time _repeat fn &rest _)
+                   (when (eq fn #'save-buffers-kill-emacs) (push fn scheduled)))))
+        (dirdiff-command-line)
+        (should (equal compared (list (expand-file-name "f" left)
+                                      (expand-file-name "f" right))))
+        (run-hooks 'ediff-quit-hook)
+        (should (equal scheduled '(save-buffers-kill-emacs))))
+      (setq command-line-args-left '("left"))
+      (should-error (dirdiff-command-line)))))
+
 ;; Requests: a file on one side only is visited in its own frame (an
 ;; option), and its missing side is struck through.
 (ert-deftest dirdiff-test-one-sided-file ()

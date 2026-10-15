@@ -1237,6 +1237,32 @@ outside Emacs."
           (dirdiff-session-cleanup session))
     buffer))
 
+;;;###autoload
+(defun dirdiff-command-line ()
+  "Compare the next two command line arguments, then exit Emacs.
+For starting dirdiff from a shell, like meld:
+
+  `emacs -l dirdiff -f dirdiff-command-line LEFT RIGHT'
+
+Directories are compared side by side and files with ediff.  Emacs
+exits when the comparison is quit, asking to save changed files.
+Return the dirdiff buffer, or nil for files."
+  (unless (cdr command-line-args-left)
+    (error "Give two files or directories after -f dirdiff-command-line"))
+  (let ((left (expand-file-name (pop command-line-args-left)
+                                command-line-default-directory))
+        (right (expand-file-name (pop command-line-args-left)
+                                 command-line-default-directory))
+        (exit (lambda () (run-at-time 0 nil #'save-buffers-kill-emacs)))
+        (dirdiff-new-frame nil))
+    (if (and (file-directory-p left) (file-directory-p right))
+        (let ((buffer (dirdiff left right)))
+          (with-current-buffer buffer
+            (add-hook 'kill-buffer-hook exit nil t))
+          buffer)
+      (add-hook 'ediff-quit-hook exit 90)
+      (dirdiff left right))))
+
 (defun dirdiff--difftool-session (left right)
   "Return a session for git difftool's directories LEFT and RIGHT.
 LEFT is a temporary snapshot, so it is read-only.  When RIGHT is the
