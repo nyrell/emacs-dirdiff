@@ -1275,8 +1275,10 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
                      (dired-get-marked-files))))
     (if (= (length marked) 2)
         marked
-      (let* ((default (and (derived-mode-p 'dired-mode) (dired-get-filename nil t)))
-             (a (read-file-name "Left file or directory: " nil default t))
+      ;; No default: with one (such as the file at point in Dired),
+      ;; completion UIs like vertico preselect a candidate, and RET
+      ;; takes that instead of the directory shown in the prompt.
+      (let* ((a (read-file-name "Left file or directory: " nil nil t))
              (other (and (derived-mode-p 'dired-mode)
                          (progn (require 'dired-aux) (dired-dwim-target-directory))))
              (b (read-file-name (format "Compare %s with: " (abbreviate-file-name a))
