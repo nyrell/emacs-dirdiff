@@ -56,7 +56,6 @@
 
 (declare-function dired-get-marked-files "dired")
 (declare-function dired-marker-regexp "dired")
-(declare-function dired-get-filename "dired")
 (declare-function dired-dwim-target-directory "dired-aux")
 (defvar ediff-diff-options)
 (defvar ediff-after-quit-hook-internal)
