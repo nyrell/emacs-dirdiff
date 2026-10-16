@@ -190,13 +190,9 @@ and [`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
 
 ## Development
 
-The checks use the `elisp-agent` tool from the emacs-for-agents
-repository (notes on writing Emacs Lisp with coding agents), cloned next
-to this one:
-
 ```sh
-T=../emacs-for-agents/tools/elisp-agent
-$T -L . check --doc dirdiff.el dirdiff-git.el   # parens, zero warnings, checkdoc
-$T indent dirdiff.el dirdiff-git.el             # standard indentation
-$T -L . test test/dirdiff-test.el               # ERT tests
+emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' \
+      -f batch-byte-compile dirdiff.el dirdiff-git.el     # zero warnings
+emacs --batch -Q -L . -l test/dirdiff-test.el \
+      -f ert-run-tests-batch-and-exit                     # ERT tests
 ```
