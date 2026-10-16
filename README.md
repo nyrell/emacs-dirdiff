@@ -148,21 +148,18 @@ parent, or the oldest and newest revisions in the region.
 
 ### git difftool
 
-`bin/dirdiff-difftool` makes dirdiff the tool for `git difftool --dir-diff`:
+To make dirdiff the tool for `git difftool --dir-diff`:
 
 ```sh
-git config --global difftool.dirdiff.cmd '/path/to/emacs-dirdiff/bin/dirdiff-difftool "$LOCAL" "$REMOTE"'
+git config --global difftool.dirdiff.cmd 'emacs -f dirdiff-difftool-command-line "$LOCAL" "$REMOTE"'
 git config --global difftool.prompt false
 git difftool -d --tool=dirdiff HEAD~3
 ```
 
 [`examples/git-difftool.gitconfig`](examples/git-difftool.gitconfig) has
-the same settings for `~/.gitconfig`, plus a `git dd` alias.
-
-If an Emacs server is running (`M-x server-start`), the comparison opens
-in a new frame there and the script waits until you quit it. Otherwise it starts a new
-Emacs that exits when you quit the comparison. Set `DIRDIFF_EMACSCLIENT` or
-`DIRDIFF_EMACS` to use other commands.
+the same settings for `~/.gitconfig`, plus a `git dd` alias. Your Emacs
+init must load dirdiff, as described [above](#installation). A new Emacs
+starts and exits when you quit the comparison.
 
 git hands the tool temporary copies, so the left side is read-only. When the
 right side is your working tree, git fills it with links to your files: copying
@@ -175,16 +172,14 @@ on; use `M-x dirdiff-git` for that.
 Like meld, from a shell:
 
 ```sh
-emacs -L /path/to/emacs-dirdiff --eval "(require 'dirdiff)" -f dirdiff-command-line LEFT RIGHT
+emacs -f dirdiff-command-line LEFT RIGHT
 ```
 
-(Not `-l dirdiff`: that loads a file named `dirdiff` in the current
-directory first, such as the shell launcher in `examples/`.)
-
 LEFT and RIGHT are two directories or two files. A new Emacs starts and
-exits when you quit the comparison. Ready-made launchers:
-[`examples/dirdiff`](examples/dirdiff) (shell; link it into your `PATH`)
-and [`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
+exits when you quit the comparison. Your Emacs init must load dirdiff, as
+described [above](#installation). Ready-made launchers:
+[`examples/dirdiff.sh`](examples/dirdiff.sh) (put it on your `PATH`) and
+[`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
 
 ## Customization
 

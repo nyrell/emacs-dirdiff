@@ -23,6 +23,8 @@
 ;;   magit, d D w        revision vs working tree
 ;;   vc log, D           revision at point vs its parent, or the region
 ;;   Dired, C-c =        the two directories marked in the visible windows
+;;   emacs -f dirdiff-command-line LEFT RIGHT            (dirdiff.sh, .bat)
+;;   emacs -f dirdiff-difftool-command-line LEFT RIGHT   (git difftool -d)
 ;;
 ;; Comparisons started from magit open in a new frame; `q' closes it.
 ;;
@@ -41,6 +43,8 @@
 (autoload 'dirdiff "dirdiff" nil t)
 (autoload 'dirdiff-dired "dirdiff" nil t)
 (autoload 'dirdiff-git "dirdiff-git" nil t)
+(autoload 'dirdiff-command-line "dirdiff")          ; dirdiff.sh, dirdiff.bat
+(autoload 'dirdiff-difftool-command-line "dirdiff") ; git-difftool.gitconfig
 
 (declare-function dirdiff-magit-setup "../dirdiff-git" ())
 (declare-function dirdiff-vc-setup "../dirdiff-git" ())

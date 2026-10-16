@@ -1318,60 +1318,54 @@ In Dired with exactly two marked entries, those are compared."
     (dirdiff (car dirs) (cadr dirs))))
 
 ;;;###autoload
-(defun dirdiff-difftool (left right &optional done-file standalone)
-  "Compare LEFT and RIGHT for `git difftool --dir-diff'.
-This is called by the `dirdiff-difftool' script.  When the comparison
-is quit, DONE-FILE is deleted, which tells the waiting script that git
-may clean up.  With STANDALONE, Emacs exits when the comparison is quit.
-Otherwise the comparison gets a new frame, as it is started from
-outside Emacs."
-  (let* ((session (dirdiff--difftool-session left right))
-         (buffer (let ((dirdiff-new-frame (not standalone)))
-                   (dirdiff-show-session session)))
-         (frame (window-frame (get-buffer-window buffer t)))
-         (on-delete-frame (lambda (f)
-                            ;; Deleting the frame also ends the comparison,
-                            ;; or the script would wait forever.
-                            (when (and (eq f frame) (buffer-live-p buffer))
-                              (kill-buffer buffer)))))
-    (add-hook 'delete-frame-functions on-delete-frame)
-    (push (lambda ()
-            (remove-hook 'delete-frame-functions on-delete-frame)
-            (when (and done-file (file-exists-p done-file))
-              (delete-file done-file))
-            (when standalone
-              (run-at-time 0 nil #'kill-emacs)))
-          (dirdiff-session-cleanup session))
-    buffer))
-
-;;;###autoload
 (defun dirdiff-command-line ()
   "Compare the next two command line arguments, then exit Emacs.
 For starting dirdiff from a shell, like meld:
 
-  `emacs --eval \"(require \='dirdiff)\" -f dirdiff-command-line LEFT RIGHT'
-
-\(Not `-l dirdiff', which loads a file named dirdiff in the current
-directory, such as the shell script of that name, if there is one.)
+  `emacs -f dirdiff-command-line LEFT RIGHT'
 
 Directories are compared side by side and files with ediff.  Emacs
 exits when the comparison is quit, asking to save changed files.
 Return the dirdiff buffer, or nil for files."
-  (unless (cdr command-line-args-left)
-    (error "Give two files or directories after -f dirdiff-command-line"))
-  (let ((left (expand-file-name (pop command-line-args-left)
-                                command-line-default-directory))
-        (right (expand-file-name (pop command-line-args-left)
-                                 command-line-default-directory))
-        (exit (lambda () (run-at-time 0 nil #'save-buffers-kill-emacs)))
-        (dirdiff-new-frame nil))
+  (pcase-let ((`(,left ,right) (dirdiff--command-line-args 'dirdiff-command-line))
+              (dirdiff-new-frame nil))
     (if (and (file-directory-p left) (file-directory-p right))
-        (let ((buffer (dirdiff left right)))
-          (with-current-buffer buffer
-            (add-hook 'kill-buffer-hook exit nil t))
-          buffer)
-      (add-hook 'ediff-quit-hook exit 90)
+        (dirdiff--exit-with (dirdiff left right))
+      (add-hook 'ediff-quit-hook #'dirdiff--exit 90)
       (dirdiff left right))))
+
+;;;###autoload
+(defun dirdiff-difftool-command-line ()
+  "Compare `git difftool --dir-diff's two directories, then exit Emacs.
+They are the next two command line arguments.  In the git config,
+set difftool.dirdiff.cmd to:
+
+  emacs -f dirdiff-difftool-command-line \"$LOCAL\" \"$REMOTE\"
+
+Unlike with `dirdiff-command-line', the left side is read-only, and
+on the right side files of the working tree can be changed but not
+added or deleted.  Return the dirdiff buffer."
+  (pcase-let ((`(,left ,right) (dirdiff--command-line-args 'dirdiff-difftool-command-line))
+              (dirdiff-new-frame nil))
+    (dirdiff--exit-with (dirdiff-show-session (dirdiff--difftool-session left right)))))
+
+(defun dirdiff--command-line-args (function)
+  "Remove two file names from the command line arguments; return them.
+FUNCTION is the function run with -f, for the error message."
+  (unless (cdr command-line-args-left)
+    (error "Give two files or directories after -f %s" function))
+  (list (expand-file-name (pop command-line-args-left) command-line-default-directory)
+        (expand-file-name (pop command-line-args-left) command-line-default-directory)))
+
+(defun dirdiff--exit ()
+  "Exit Emacs soon, asking to save changed files."
+  (run-at-time 0 nil #'save-buffers-kill-emacs))
+
+(defun dirdiff--exit-with (buffer)
+  "Exit Emacs when BUFFER is killed; return BUFFER."
+  (with-current-buffer buffer
+    (add-hook 'kill-buffer-hook #'dirdiff--exit nil t))
+  buffer)
 
 (defun dirdiff--difftool-session (left right)
   "Return a session for git difftool's directories LEFT and RIGHT.

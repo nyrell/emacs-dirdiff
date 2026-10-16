@@ -459,6 +459,24 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
       (should (equal (dirdiff-test--messages #'dirdiff-open)
                      '("Symbolic links are different"))))))
 
+;; Request: git difftool runs Emacs directly, without a script.
+(ert-deftest dirdiff-test-difftool-command-line ()
+  (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2"))
+    (let ((command-line-default-directory root)
+          (command-line-args-left '("left" "right"))
+          scheduled)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_time _repeat fn &rest _) (push fn scheduled))))
+        (let ((buffer (dirdiff-difftool-command-line)))
+          (with-current-buffer buffer
+            (should (equal (dirdiff-dir-source-root (dirdiff-session-right dirdiff--session))
+                           right))
+            (should-not (dirdiff-source-writable (dirdiff-session-left dirdiff--session))))
+          (should-not command-line-args-left)
+          (kill-buffer buffer)
+          (should (equal scheduled '(save-buffers-kill-emacs))))
+        (should-error (dirdiff-difftool-command-line))))))
+
 ;; Bug: git difftool's left side is a temporary snapshot and its right
 ;; side links into the working tree, yet both were fully writable.
 (ert-deftest dirdiff-test-difftool-sides ()
