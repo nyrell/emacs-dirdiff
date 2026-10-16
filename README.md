@@ -95,7 +95,6 @@ files you changed, then compares them again
 (`dirdiff-save-after-ediff`: `ask`, `t` or `nil`). Binary files (with a NUL byte in the first 8000 bytes) are by
 default compared by size and modification time only; press `b` or set
 `dirdiff-binary-comparison` to `full` to compare them byte by byte.
-`.gitignore` files are not consulted.
 
 ## Git
 
@@ -124,9 +123,6 @@ This adds to magit's diff menu (`d`):
 | `D p` | a range, like `git difftool -d RANGE`; at a commit it suggests `<commit>^..<commit>`, the commit with its previous one; commits selected in a log give `A..B`, with a prefix argument `A...B` |
 | `D h` | a revision with `HEAD` (`git difftool -d REV..HEAD`) |
 | `D w` | a revision with the working tree (`git difftool -d REV`) |
-
-Suffixes already on these keys, such as `git difftool` ones, are
-replaced.
 
 Comparisons started from magit open in a new (maximized) frame, so
 magit's windows are left alone; `q` deletes the frame again. See
