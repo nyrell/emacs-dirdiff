@@ -459,6 +459,36 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
       (should (equal (dirdiff-test--messages #'dirdiff-open)
                      '("Symbolic links are different"))))))
 
+;; Request: with core.symlinks false (Windows), git copies the working
+;; tree's files instead of linking to them, and copies changes back.
+(ert-deftest dirdiff-test-difftool-copies ()
+  (dirdiff-test--with-dirs
+      '(("copied" . "old") ("temp" . "a") ("new" . "n"))
+      '(("copied" . "current") ("temp" . "b"))
+    (let ((worktree (expand-file-name "worktree/" root)))
+      (dirdiff-test--write worktree '(("copied" . "current") ("temp" . "changed since")))
+      (let* ((process-environment (cons (concat "GIT_WORK_TREE=" worktree)
+                                        process-environment))
+             (session (dirdiff--difftool-session left right)))
+        (should (eq (dirdiff-source-writable (dirdiff-session-right session)) 'working-tree))
+        (dirdiff-test--in-buffer session
+          (dirdiff-test--goto "copied")
+          (set-file-times (expand-file-name "copied" left) 0)
+          (dirdiff-copy-to-right)
+          (should (equal (dirdiff-test--read (expand-file-name "copied" right)) "old"))
+          ;; A new time, so that git sees the change.
+          (should (time-less-p (time-subtract nil 60)
+                               (file-attribute-modification-time
+                                (file-attributes (expand-file-name "copied" right)))))
+          (dirdiff-test--goto "temp")
+          (should-error (dirdiff-copy-to-right) :type 'user-error)
+          (dirdiff-test--goto "new")
+          (should-error (dirdiff-copy-to-right) :type 'user-error)))
+      ;; Without GIT_WORK_TREE, nothing is known to be copied back.
+      (let ((process-environment (cons "GIT_WORK_TREE" process-environment)))
+        (should-not (dirdiff-source-writable
+                     (dirdiff-session-right (dirdiff--difftool-session left right))))))))
+
 ;; Request: git difftool runs Emacs directly, without a script.
 (ert-deftest dirdiff-test-difftool-command-line ()
   (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2"))

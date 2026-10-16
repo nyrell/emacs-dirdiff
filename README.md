@@ -161,11 +161,13 @@ the same settings for `~/.gitconfig`, plus a `git dd` alias. Your Emacs
 init must load dirdiff, as described [above](#installation). A new Emacs
 starts and exits when you quit the comparison.
 
-git hands the tool temporary copies, so the left side is read-only. When the
-right side is your working tree, git fills it with links to your files: copying
-a file onto one of those, or saving it in ediff, changes your working tree.
-Adding or deleting files is refused there, because git would not pass the change
-on; use `M-x dirdiff-git` for that.
+git hands the tool temporary copies, so the left side is read-only. On the
+right side, the files that are the same as in your working tree are links to
+them, or, where git does not make links (`core.symlinks` false, as on
+Windows), copies that git copies back when you quit. Copying onto those files,
+or saving them in ediff, changes your working tree; other files there are
+temporary and refused. Adding or deleting files is refused too, because git
+would not pass the change on; use `M-x dirdiff-git` for that.
 
 ## Command line
 

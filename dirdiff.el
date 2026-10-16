@@ -185,9 +185,9 @@ buffer, which leaves magit's windows as they were.  Quitting with
 
 (cl-defstruct (dirdiff-source (:constructor nil) (:copier nil))
   "Where one side of the comparison comes from.
-WRITABLE is nil (read-only), t, or `through-links': only files that
-are symbolic links may be overwritten, by writing into the files they
-point to (git difftool's working tree side)."
+WRITABLE is nil (read-only), t, or `working-tree': only the files
+that git difftool took from the working tree may be overwritten, see
+`dirdiff--working-tree-file'."
   label writable)
 
 (cl-defstruct (dirdiff-dir-source (:include dirdiff-source)
@@ -196,8 +196,11 @@ point to (git difftool's working tree side)."
   "A directory on disk.
 If ONLY is a hash table, it lists the relative names to include,
 mapped to `file' or `dir' (used for git working trees); otherwise
-everything except `dirdiff-ignored-names' is included."
-  root only)
+everything except `dirdiff-ignored-names' is included.
+COPIES maps relative names to working tree files, for the files that
+git difftool copied from the working tree (instead of linking to them)
+and copies back when the tool exits."
+  root only copies)
 
 (cl-defstruct (dirdiff-session (:constructor dirdiff-session-create)
                                (:copier nil))
@@ -914,11 +917,16 @@ A side where the file is missing is shown as an empty, read-only file."
 (defun dirdiff--save-after-ediff (session left right)
   "Save the changed buffers of files LEFT and RIGHT of SESSION.
 Do what `dirdiff-save-after-ediff' says; nil files are skipped, and
-so are files on read-only sides."
+so are files that cannot be changed on their side."
   (let ((buffers (cl-loop for (side file) in `((left ,left) (right ,right))
+                          for source = (dirdiff--session-source session side)
                           for buffer = (and file
-                                            (dirdiff-source-writable
-                                             (dirdiff--session-source session side))
+                                            (pcase (dirdiff-source-writable source)
+                                              ('working-tree
+                                               (dirdiff--working-tree-file
+                                                source (file-relative-name
+                                                        file (dirdiff-dir-source-root source))))
+                                              (writable writable))
                                             (get-file-buffer file))
                           when (and buffer (buffer-modified-p buffer))
                           collect buffer)))
@@ -1008,6 +1016,17 @@ If it only exists on the other side, visit that."
       (user-error "The %s side (%s) is read-only" side (dirdiff-source-label source)))
     (expand-file-name (dirdiff-node-rel node) (dirdiff-dir-source-root source))))
 
+(defun dirdiff--working-tree-file (source rel)
+  "Return the working tree file for REL in SOURCE, or nil.
+SOURCE is git difftool's right side: its files are links into the
+working tree, or copies that git copies back to it when the tool
+exits.  Other files there are temporary, so changes to them are lost."
+  (let ((file (expand-file-name rel (dirdiff-dir-source-root source))))
+    (if (file-symlink-p file)
+        (file-truename file)
+      (and (dirdiff-dir-source-copies source)
+           (gethash rel (dirdiff-dir-source-copies source))))))
+
 (defun dirdiff--delete-local (file)
   "Delete FILE, or directory FILE with its contents.
 Respects `delete-by-moving-to-trash'."
@@ -1024,37 +1043,43 @@ Respects `delete-by-moving-to-trash'."
                                 (dirdiff-node-rel node) from)))
          (dest (dirdiff--writable-path node to))
          (existing (dirdiff--node-entry node to))
-         (through-links (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session to))
-                            'through-links)))
-    (when (and through-links
-               (not (and (eq (dirdiff-entry-type entry) 'file)
-                         existing (eq (dirdiff-entry-type existing) 'file)
-                         (file-symlink-p dest))))
-      (user-error "Only files linked to the working tree can be changed here"))
-    (when (dirdiff--confirm-copy node entry existing to dest through-links)
+         (source (dirdiff--session-source dirdiff--session to))
+         (working-tree (and (eq (dirdiff-source-writable source) 'working-tree)
+                            (or (and (eq (dirdiff-entry-type entry) 'file)
+                                     existing (eq (dirdiff-entry-type existing) 'file)
+                                     (dirdiff--working-tree-file source (dirdiff-node-rel node)))
+                                (user-error "Only files from the working tree can be changed here")))))
+    (when (dirdiff--confirm-copy node entry existing to dest working-tree)
       ;; Replace what is there, so that both sides end up identical
       ;; (a symlink is replaced, not written through), except where
-      ;; writing through links is the point.
-      (when (and existing (not through-links))
+      ;; writing into the working tree file is the point.
+      (when (and existing (not working-tree))
         (dirdiff--delete-local dest))
       (make-directory (file-name-directory (directory-file-name dest)) t)
       (dirdiff-source-copy-to (dirdiff--session-source dirdiff--session from)
                               entry (dirdiff-node-rel node) dest)
+      ;; The copy keeps the time of the original; with an old time and
+      ;; the same size, git could take a copy for unchanged and not
+      ;; copy it back to the working tree.
+      (when working-tree
+        (set-file-times dest))
       (dirdiff--refresh-node dirdiff--session node)
       (dirdiff--render))))
 
-(defun dirdiff--confirm-copy (node entry existing to dest through-links)
+(defun dirdiff--confirm-copy (node entry existing to dest working-tree)
   "Ask whether to copy ENTRY of NODE to side TO, at local file DEST.
-EXISTING is what is there now.  Replacing something asks with
+EXISTING is what is there now.  WORKING-TREE is the working tree file
+that DEST changes, if any.  Replacing something asks with
 `yes-or-no-p' and says what happens to the current version."
   (let ((name (concat (dirdiff-node-rel node) (if (dirdiff--entry-dir-p entry) "/" ""))))
     (cond
      ((not existing)
       (y-or-n-p (format "Copy %s to the %s side? " name to)))
-     (through-links
-      (yes-or-no-p (format "Overwrite %s with the %s version? "
-                           (abbreviate-file-name (file-truename dest))
-                           (dirdiff--other-side to))))
+     (working-tree
+      (yes-or-no-p (format "Overwrite %s with the %s version%s? "
+                           (abbreviate-file-name working-tree)
+                           (dirdiff--other-side to)
+                           (if (file-symlink-p dest) "" " (when you quit)"))))
      (t
       (yes-or-no-p (format "The current %s will be %s.  Replace %s on the %s side? "
                            (if (dirdiff--entry-dir-p existing) "directory" "file")
@@ -1369,15 +1394,37 @@ FUNCTION is the function run with -f, for the error message."
 
 (defun dirdiff--difftool-session (left right)
   "Return a session for git difftool's directories LEFT and RIGHT.
-LEFT is a temporary snapshot, so it is read-only.  When RIGHT is the
-working tree, git fills it with symbolic links to the working tree's
-files; only those can be changed, which changes the working tree."
-  (dirdiff-session-create
-   :left (dirdiff--dir-source left)
-   :right (dirdiff--dir-source
-           right (and (cl-some #'file-symlink-p (directory-files-recursively right ""))
-                      'through-links))
-   :hide-identical t))
+LEFT is a temporary snapshot, so it is read-only.  On the right side,
+only the files that git took from the working tree can be changed,
+which changes the working tree: git links to them, or copies them and
+copies changes back when the tool exits (with core.symlinks false, as
+on Windows)."
+  (let* ((files (directory-files-recursively right ""))
+         (links (cl-some #'file-symlink-p files))
+         (copies (unless links (dirdiff--difftool-copies right files)))
+         (source (dirdiff--dir-source
+                  right (and (or links (> (hash-table-count copies) 0)) 'working-tree))))
+    (setf (dirdiff-dir-source-copies source) copies)
+    (dirdiff-session-create :left (dirdiff--dir-source left) :right source
+                            :hide-identical t)))
+
+(defun dirdiff--difftool-copies (right files)
+  "Return a table of the FILES in RIGHT that git copied from the working tree.
+It maps their relative names to the working tree files.  git copies
+a file when it is the same as in the working tree; the working tree
+is in $GIT_WORK_TREE, which git sets for the tool."
+  (let ((table (make-hash-table :test #'equal))
+        (worktree (getenv "GIT_WORK_TREE")))
+    (when worktree
+      (dolist (file files)
+        (let* ((rel (file-relative-name file right))
+               (wt (expand-file-name rel worktree)))
+          (when (and (file-regular-p wt)
+                     (eql (file-attribute-size (file-attributes file))
+                          (file-attribute-size (file-attributes wt)))
+                     (string= (dirdiff--read-bytes file) (dirdiff--read-bytes wt)))
+            (puthash rel wt table)))))
+    table))
 
 (provide 'dirdiff)
 ;;; dirdiff.el ends here
