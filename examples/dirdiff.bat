@@ -17,4 +17,4 @@ if "%~2"=="" (
 if not defined DIRDIFF_DIR set "DIRDIFF_DIR=%~dp0.."
 if not defined DIRDIFF_EMACS set "DIRDIFF_EMACS=runemacs.exe"
 
-start "" "%DIRDIFF_EMACS%" -L "%DIRDIFF_DIR%" -l dirdiff -f dirdiff-command-line "%~f1" "%~f2"
+start "" "%DIRDIFF_EMACS%" -L "%DIRDIFF_DIR%" --eval "(require 'dirdiff)" -f dirdiff-command-line "%~f1" "%~f2"

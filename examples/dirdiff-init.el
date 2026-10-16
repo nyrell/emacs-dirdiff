@@ -72,6 +72,9 @@
 ;; (setq dirdiff-frame-parameters '((fullscreen . maximized))) ; nil: normal size
 ;; (setq dirdiff-hide-identical nil)        ; directories; git always starts hidden
 ;; (setq dirdiff-ignore-whitespace nil)
+;; (setq dirdiff-ignore-line-endings t)    ; nil: CRLF vs LF is a difference
+;; (setq dirdiff-ignore-file-modes t)       ; nil: the executable bit counts
+;; (setq dirdiff-save-after-ediff 'ask)     ; t: save without asking, nil: never
 ;; (setq dirdiff-binary-comparison 'quick)  ; `full': byte by byte
 
 ;;; dirdiff-init.el ends here

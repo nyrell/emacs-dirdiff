@@ -216,10 +216,11 @@ Return (ONLY . UNTRACKED): ONLY maps relative names to `file' or
           (setq dir (file-name-directory dir)))))
     (cons only untracked)))
 
-(defun dirdiff-git--changed-paths (repo revs ignore-whitespace)
+(defun dirdiff-git--changed-paths (repo revs session)
   "Return a hash table of the paths that differ between REVS in REPO.
 REVS is (REV) to compare with the working tree, or (REV1 REV2).
-With IGNORE-WHITESPACE, leave out files whose changes are all whitespace."
+Leave out the files whose changes SESSION ignores: whitespace, line
+endings or the file mode."
   (let ((changed (make-hash-table :test #'equal))
         (fields (apply #'dirdiff-git--lines repo "diff" "--raw" "-z"
                        "--no-renames" "--no-ext-diff" revs)))
@@ -228,13 +229,24 @@ With IGNORE-WHITESPACE, leave out files whose changes are all whitespace."
       (let ((meta (pop fields)) (path (pop fields)))
         (when (string-prefix-p ":" meta)
           (puthash path t changed))))
-    (when ignore-whitespace
-      ;; `--numstat -w' leaves out files whose changes are all whitespace.
-      (let ((real (make-hash-table :test #'equal)))
-        (dolist (record (apply #'dirdiff-git--lines repo "diff" "--numstat" "-z" "-w"
-                               "--no-renames" "--no-ext-diff" revs))
-          (when (string-match "\\`[0-9-]+\t[0-9-]+\t\\(\\(?:.\\|\n\\)*\\)\\'" record)
-            (puthash (match-string 1 record) t real)))
+    (when (or (dirdiff-session-ignore-whitespace session)
+              (dirdiff-session-ignore-line-endings session)
+              (dirdiff-session-ignore-modes session))
+      ;; `--numstat -w' leaves out files whose changes are all
+      ;; whitespace, and a file whose mode only changed has "0 0".
+      (let ((real (make-hash-table :test #'equal))
+            (modes (not (dirdiff-session-ignore-modes session))))
+        (dolist (record (apply #'dirdiff-git--lines repo "diff" "--numstat" "-z"
+                               (append
+                                (cond ((dirdiff-session-ignore-whitespace session) '("-w"))
+                                      ((dirdiff-session-ignore-line-endings session)
+                                       '("--ignore-cr-at-eol")))
+                                '("--no-renames" "--no-ext-diff")
+                                revs)))
+          (when (and (string-match "\\`\\([0-9-]+\t[0-9-]+\\)\t\\(\\(?:.\\|\n\\)*\\)\\'"
+                                   record)
+                     (or modes (not (equal (match-string 1 record) "0\t0"))))
+            (puthash (match-string 2 record) t real)))
         (maphash (lambda (path _) (unless (gethash path real) (remhash path changed)))
                  changed)))
     changed))
@@ -256,7 +268,7 @@ With IGNORE-WHITESPACE, leave out files whose changes are all whitespace."
                     repo
                     (cons (dirdiff-git-source-rev left)
                           (and (not worktree) (list (dirdiff-git-source-rev right))))
-                    (dirdiff-session-ignore-whitespace session))))
+                    session)))
       ;; git diff knows nothing about untracked files; returning nil
       ;; makes dirdiff compare those by content.
       (lambda (node)

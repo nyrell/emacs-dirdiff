@@ -17,4 +17,4 @@ if [ $# -ne 2 ]; then
     exit 2
 fi
 
-exec ${DIRDIFF_EMACS:-emacs} -L "$dir" -l dirdiff -f dirdiff-command-line "$1" "$2"
+exec ${DIRDIFF_EMACS:-emacs} -L "$dir" --eval "(require 'dirdiff)" -f dirdiff-command-line "$1" "$2"

@@ -57,8 +57,9 @@ line:
 
 ### Keys in the dirdiff buffer
 
-One side is *active* (highlighted). Visiting, copying and deleting act on
-it.
+One side is *active*: its cell on the current row is highlighted and
+marked `▶`, and so is its label in the header line. Visiting, copying and
+deleting act on it.
 
 | Key | Action |
 |---|---|
@@ -69,6 +70,8 @@ it.
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
 | `=` | hide or show identical entries |
 | `w` | ignore whitespace on/off (also used by ediff) |
+| `e` | ignore line endings (CRLF vs LF) on/off (also used by ediff) |
+| `x` | ignore the executable bit on/off |
 | `b` | compare binary files byte by byte, or by size and time only |
 | `g` | compare again |
 | `>`, `<` | copy the entry to the right / left side (directories are replaced) |
@@ -83,7 +86,13 @@ There is also a *Dirdiff* menu in the menu bar.
 ### Comparing
 
 Text files are compared by content (optionally ignoring whitespace, like
-`diff -w`). Binary files (with a NUL byte in the first 8000 bytes) are by
+`diff -w`). By default, differences only in line endings (CRLF vs LF) or
+in the executable bit are ignored; `e` and `x` turn that off, shown as
+`[eol]` and `[x]` in the mode line.
+
+When you quit an ediff started from dirdiff, it asks whether to save the
+files you changed, then compares them again
+(`dirdiff-save-after-ediff`: `ask`, `t` or `nil`). Binary files (with a NUL byte in the first 8000 bytes) are by
 default compared by size and modification time only; press `b` or set
 `dirdiff-binary-comparison` to `full` to compare them byte by byte.
 `.gitignore` files are not consulted.
@@ -166,8 +175,11 @@ on; use `M-x dirdiff-git` for that.
 Like meld, from a shell:
 
 ```sh
-emacs -L /path/to/emacs-dirdiff -l dirdiff -f dirdiff-command-line LEFT RIGHT
+emacs -L /path/to/emacs-dirdiff --eval "(require 'dirdiff)" -f dirdiff-command-line LEFT RIGHT
 ```
+
+(Not `-l dirdiff`: that loads a file named `dirdiff` in the current
+directory first, such as the shell launcher in `examples/`.)
 
 LEFT and RIGHT are two directories or two files. A new Emacs starts and
 exits when you quit the comparison. Ready-made launchers:
@@ -179,14 +191,16 @@ and [`examples/dirdiff.bat`](examples/dirdiff.bat) (Windows).
 `M-x customize-group RET dirdiff`. Among others:
 
 - `dirdiff-ignored-names` (`.git`, `.hg`, … by default; set to nil to include them)
-- `dirdiff-ignore-whitespace`
+- `dirdiff-ignore-whitespace`, `dirdiff-ignore-line-endings`,
+  `dirdiff-ignore-file-modes`
+- `dirdiff-save-after-ediff` — `ask` (default), `t` or `nil`
 - `dirdiff-binary-comparison`
 - `dirdiff-hide-identical`
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
 - `dirdiff-new-frame` — `magit` (default: new frame when started from
   magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
-  `dirdiff-conflict`, `dirdiff-active-cell`
+  `dirdiff-conflict`, `dirdiff-active-cell`, `dirdiff-active-marker`
 
 ## Development
 

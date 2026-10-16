@@ -30,7 +30,7 @@
 ;; expands it on both sides.  Entries are colored by status: identical,
 ;; changed, present on one side only, or file-vs-directory conflict.
 ;;
-;; One side is "active" (highlighted); TAB switches side.  RET on a file
+;; One side is "active" (highlighted and marked ▶); TAB switches side.  RET on a file
 ;; pair runs `ediff-files', RET on a directory expands or collapses it.
 ;; Files and directories can be copied to the other side or deleted.
 ;;
@@ -77,6 +77,27 @@
 This corresponds to `diff -w'.  It also applies to ediff sessions
 started from dirdiff."
   :type 'boolean)
+
+(defcustom dirdiff-ignore-line-endings t
+  "Non-nil means text files differing only in line endings are identical.
+A file with Windows line endings (CRLF) is then the same as one with
+Unix line endings (LF).  It also applies to ediff sessions started
+from dirdiff."
+  :type 'boolean)
+
+(defcustom dirdiff-ignore-file-modes t
+  "Non-nil means files differing only in their executable bit are identical.
+nil reports such files as changed, as git does."
+  :type 'boolean)
+
+(defcustom dirdiff-save-after-ediff 'ask
+  "Whether to save the files changed in ediff when it quits.
+`ask' asks for each changed file, t saves without asking and nil
+leaves them unsaved.  The entry is compared again afterwards, using
+the files as saved on disk."
+  :type '(choice (const :tag "Ask" ask)
+                 (const :tag "Save without asking" t)
+                 (const :tag "Do not save" nil)))
 
 (defcustom dirdiff-binary-comparison 'quick
   "How to compare binary files.
@@ -136,6 +157,9 @@ buffer, which leaves magit's windows as they were.  Quitting with
 (defface dirdiff-active-cell '((t :inherit region :extend nil))
   "Face for the active side of the current row.")
 
+(defface dirdiff-active-marker '((t :weight bold))
+  "Face for the ▶ that marks the active side.")
+
 (defface dirdiff-header '((t :inherit shadow))
   "Face for the label of the inactive side in the header line.")
 
@@ -187,6 +211,8 @@ everything except `dirdiff-ignored-names' is included."
   cleanup     ; list of functions run when the buffer is killed
   counts      ; (CHANGED LEFT-ONLY RIGHT-ONLY CONFLICTS)
   (ignore-whitespace dirdiff-ignore-whitespace)
+  (ignore-line-endings dirdiff-ignore-line-endings)
+  (ignore-modes dirdiff-ignore-file-modes)
   (binary-comparison dirdiff-binary-comparison)
   (hide-identical dirdiff-hide-identical))
 
@@ -299,6 +325,10 @@ PROGRAM with ARGS, if it is available."
   "Remove whitespace within lines from STRING, like `diff -w'."
   (replace-regexp-in-string "[ \t\f\v\r]+" "" string t t))
 
+(defun dirdiff--strip-cr (string)
+  "Turn the CRLF line endings in STRING into LF."
+  (string-replace "\r\n" "\n" string))
+
 (defun dirdiff--compare-files (session a b quick)
   "Compare local files A and B using the options of SESSION.
 Return `same' or `changed'.  QUICK nil means that the modification
@@ -319,6 +349,9 @@ byte by byte even if SESSION says to compare them quickly."
                             (file-attribute-modification-time attrs-b)))
              ((and (not binary) (dirdiff-session-ignore-whitespace session))
               (dirdiff--equal-p a b sizes "diff" '("-q" "-w") #'dirdiff--strip-whitespace))
+             ((and (not binary) (dirdiff-session-ignore-line-endings session))
+              (dirdiff--equal-p a b sizes "diff" '("-q" "--strip-trailing-cr")
+                                #'dirdiff--strip-cr))
              ((not (eql sa sb)) nil)
              (t (dirdiff--equal-p a b sizes "cmp" '("-s") #'identity)))
             'same
@@ -346,6 +379,9 @@ It is what the session's `prepare' function returned.")
                                 (dirdiff--link-target r (file 'right))))
                     'same 'changed))
                ((or (eq lt 'module) (eq rt 'module)) 'changed)
+               ((and (not (dirdiff-session-ignore-modes session))
+                     (not (eq (dirdiff--executable-p l) (dirdiff--executable-p r))))
+                'changed)
                (t (dirdiff--compare-files session (file 'left) (file 'right)
                                           (and (dirdiff-entry-mtime l)
                                                (dirdiff-entry-mtime r))))))
@@ -510,6 +546,7 @@ Changed directories are not; their contents are."
 (defvar-local dirdiff--width 40 "Width of each column.")
 (defvar-local dirdiff--rows [] "Vector of (NODE . DEPTH), one per line.")
 (defvar-local dirdiff--cell-overlay nil)
+(defvar-local dirdiff--marker-overlay nil)
 
 (defun dirdiff--current-node ()
   "Return the node on the current line, or nil."
@@ -568,7 +605,8 @@ Changed directories are not; their contents are."
   (let* ((entry (dirdiff--node-entry node side))
          (type (and entry (dirdiff-entry-type entry)))
          (dir (and (dirdiff--node-dir-p node) (memq type '(nil dir))))
-         (text (concat (make-string (* 2 depth) ?\s)
+         ;; The first column is left free for the active side's ▶.
+         (text (concat (make-string (1+ (* 2 depth)) ?\s)
                        (propertize (concat (cond ((not dir) "  ")
                                                  ((dirdiff--open-p node) "▾ ")
                                                  (t "▸ "))
@@ -605,7 +643,8 @@ Changed directories are not; their contents are."
     (cl-flet ((cell (side)
                 (let ((source (dirdiff--session-source dirdiff--session side)))
                   (truncate-string-to-width
-                   (propertize (concat (dirdiff-source-label source)
+                   (propertize (concat (if (eq side dirdiff--side) "▶ " "  ")
+                                       (dirdiff-source-label source)
                                        (unless (dirdiff-source-writable source)
                                          " [read-only]"))
                                'face (if (eq side dirdiff--side)
@@ -626,6 +665,8 @@ Changed directories are not; their contents are."
                    (if (> conflict 0) (format " !%d" conflict) "")))
          (and (dirdiff-session-hide-identical s) " [hide=]")
          (and (dirdiff-session-ignore-whitespace s) " [-w]")
+         (and (not (dirdiff-session-ignore-line-endings s)) " [eol]")
+         (and (not (dirdiff-session-ignore-modes s)) " [x]")
          (and (eq (dirdiff-session-binary-comparison s) 'full) " [bin:full]"))))))
 
 (defun dirdiff--line-of-node (node)
@@ -666,10 +707,16 @@ Changed directories are not; their contents are."
          (end (next-single-property-change start 'dirdiff-side nil eol)))
     (goto-char start)
     (unless (overlayp dirdiff--cell-overlay)
-      (setq dirdiff--cell-overlay (make-overlay 1 1))
+      (setq dirdiff--cell-overlay (make-overlay 1 1)
+            dirdiff--marker-overlay (make-overlay 1 1))
       (overlay-put dirdiff--cell-overlay 'face 'dirdiff-active-cell)
-      (overlay-put dirdiff--cell-overlay 'priority 10))
-    (move-overlay dirdiff--cell-overlay start end)))
+      (overlay-put dirdiff--cell-overlay 'priority 10)
+      (overlay-put dirdiff--marker-overlay 'display
+                   (propertize "▶" 'face '(dirdiff-active-marker dirdiff-active-cell))))
+    (move-overlay dirdiff--cell-overlay start end)
+    (if (< start end)
+        (move-overlay dirdiff--marker-overlay start (1+ start))
+      (delete-overlay dirdiff--marker-overlay))))
 
 (defun dirdiff--post-command ()
   "Keep point and the highlight on the active cell."
@@ -790,6 +837,18 @@ With BACKWARD, move to the previous one."
   (cl-callf not (dirdiff-session-ignore-whitespace dirdiff--session))
   (dirdiff-refresh))
 
+(defun dirdiff-toggle-ignore-line-endings ()
+  "Toggle ignoring CRLF versus LF line endings in text files, and compare again."
+  (interactive)
+  (cl-callf not (dirdiff-session-ignore-line-endings dirdiff--session))
+  (dirdiff-refresh))
+
+(defun dirdiff-toggle-ignore-modes ()
+  "Toggle ignoring changes of the executable bit, and compare again."
+  (interactive)
+  (cl-callf not (dirdiff-session-ignore-modes dirdiff--session))
+  (dirdiff-refresh))
+
 (defun dirdiff-toggle-binary-comparison ()
   "Toggle comparing binary files by content or by size and time, and compare again."
   (interactive)
@@ -823,13 +882,17 @@ A side where the file is missing is shown as an empty, read-only file."
          (right (or (dirdiff--local-file node 'right) absent))
          (buffer (current-buffer))
          (config (current-window-configuration))
+         (session dirdiff--session)
          (ediff-diff-options
-          (if (dirdiff-session-ignore-whitespace dirdiff--session)
-              (string-trim (concat ediff-diff-options " -w"))
-            ediff-diff-options))
+          (string-trim (concat ediff-diff-options
+                               (and (dirdiff-session-ignore-whitespace session) " -w")
+                               (and (dirdiff-session-ignore-line-endings session)
+                                    " --strip-trailing-cr"))))
          (after-quit
           (lambda ()
             (set-window-configuration config)
+            (dirdiff--save-after-ediff
+             session (and (dirdiff-node-left node) left) (and (dirdiff-node-right node) right))
             (when absent
               (when-let* ((b (get-file-buffer absent)))
                 (kill-buffer b))
@@ -848,6 +911,21 @@ A side where the file is missing is shown as an empty, read-only file."
                                      (append (remq t (default-value
                                                       'ediff-after-quit-hook-internal))
                                              (list after-quit))))))))
+
+(defun dirdiff--save-after-ediff (session left right)
+  "Save the changed buffers of files LEFT and RIGHT of SESSION.
+Do what `dirdiff-save-after-ediff' says; nil files are skipped, and
+so are files on read-only sides."
+  (let ((buffers (cl-loop for (side file) in `((left ,left) (right ,right))
+                          for buffer = (and file
+                                            (dirdiff-source-writable
+                                             (dirdiff--session-source session side))
+                                            (get-file-buffer file))
+                          when (and buffer (buffer-modified-p buffer))
+                          collect buffer)))
+    (when (and buffers dirdiff-save-after-ediff)
+      (save-some-buffers (not (eq dirdiff-save-after-ediff 'ask))
+                         (lambda () (memq (current-buffer) buffers))))))
 
 (defun dirdiff-open ()
   "Diff the files on the current row, or expand/collapse the directory.
@@ -892,7 +970,9 @@ A file that exists on one side only is diffed with an empty file."
   "Non-nil if ENTRY is an executable file."
   (if (dirdiff-entry-mode entry)
       (equal (dirdiff-entry-mode entry) "100755")
-    (file-executable-p (dirdiff-entry-file entry))))
+    (and (dirdiff-entry-file entry)
+         (file-executable-p (dirdiff-entry-file entry))
+         t)))
 
 (defun dirdiff-mouse-open (event)
   "Open the entry clicked on with EVENT, like `dirdiff-open'."
@@ -1040,6 +1120,8 @@ If the comparison has its own frame, delete it."
   [["Show and compare"
     ("=" "Hide identical (toggle)" dirdiff-toggle-hide-identical :transient t)
     ("w" "Ignore whitespace (toggle)" dirdiff-toggle-ignore-whitespace :transient t)
+    ("e" "Ignore line endings (toggle)" dirdiff-toggle-ignore-line-endings :transient t)
+    ("x" "Ignore executable bit (toggle)" dirdiff-toggle-ignore-modes :transient t)
     ("b" "Binary files: full/quick (toggle)" dirdiff-toggle-binary-comparison :transient t)
     ("g" "Refresh" dirdiff-refresh :transient t)]
    ["Edit"
@@ -1067,6 +1149,8 @@ If the comparison has its own frame, delete it."
   "*" #'dirdiff-expand-changed
   "=" #'dirdiff-toggle-hide-identical
   "w" #'dirdiff-toggle-ignore-whitespace
+  "e" #'dirdiff-toggle-ignore-line-endings
+  "x" #'dirdiff-toggle-ignore-modes
   "b" #'dirdiff-toggle-binary-comparison
   "g" #'dirdiff-refresh
   ">" #'dirdiff-copy-to-right
@@ -1094,6 +1178,10 @@ If the comparison has its own frame, delete it."
      :style toggle :selected (dirdiff-session-hide-identical dirdiff--session)]
     ["Ignore whitespace" dirdiff-toggle-ignore-whitespace
      :style toggle :selected (dirdiff-session-ignore-whitespace dirdiff--session)]
+    ["Ignore line endings" dirdiff-toggle-ignore-line-endings
+     :style toggle :selected (dirdiff-session-ignore-line-endings dirdiff--session)]
+    ["Ignore executable bit" dirdiff-toggle-ignore-modes
+     :style toggle :selected (dirdiff-session-ignore-modes dirdiff--session)]
     ["Compare binary files byte by byte" dirdiff-toggle-binary-comparison
      :style toggle :selected (eq (dirdiff-session-binary-comparison dirdiff--session) 'full)]
     ["Refresh" dirdiff-refresh]
@@ -1122,7 +1210,6 @@ copy, delete and visit act on it.
   (setq-local mode-line-process '(:eval (dirdiff--mode-line)))
   (header-line-indent-mode 1)
   (setq header-line-format '("" header-line-indent (:eval (dirdiff--header-line))))
-  (hl-line-mode 1)
   (add-hook 'post-command-hook #'dirdiff--post-command nil t)
   (add-hook 'window-size-change-functions #'dirdiff--window-size-change nil t)
   (add-hook 'kill-buffer-hook #'dirdiff--cleanup nil t))
@@ -1261,7 +1348,10 @@ outside Emacs."
   "Compare the next two command line arguments, then exit Emacs.
 For starting dirdiff from a shell, like meld:
 
-  `emacs -l dirdiff -f dirdiff-command-line LEFT RIGHT'
+  `emacs --eval \"(require \='dirdiff)\" -f dirdiff-command-line LEFT RIGHT'
+
+\(Not `-l dirdiff', which loads a file named dirdiff in the current
+directory, such as the shell script of that name, if there is one.)
 
 Directories are compared side by side and files with ediff.  Emacs
 exits when the comparison is quit, asking to save changed files.
