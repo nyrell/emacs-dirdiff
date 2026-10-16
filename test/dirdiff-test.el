@@ -432,6 +432,35 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
       (should (equal (dirdiff-test--messages #'dirdiff-open)
                      '("Binary file on the left only"))))))
 
+;; Request: comparing the directories of two Dired windows side by side
+;; uses the space of both, and quitting restores them.
+(ert-deftest dirdiff-test-replace-dired-windows ()
+  (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2"))
+    (save-window-excursion
+      (delete-other-windows)
+      (let* ((other (get-buffer-create "*dirdiff-test-other*"))
+             (bottom (split-window nil nil 'below))
+             (right-window (split-window nil nil 'right))
+             (left-dired (dired-noselect left))
+             (right-dired (dired-noselect right)))
+        (set-window-buffer bottom other)
+        (set-window-buffer (selected-window) left-dired)
+        (set-window-buffer right-window right-dired)
+        (let* ((width (+ (window-total-width) (window-total-width right-window)))
+               (buffer (with-current-buffer left-dired (dirdiff left right))))
+          (unwind-protect
+              (progn
+                (should (eq (window-buffer) buffer))
+                (should (= (window-total-width) width))
+                (should (= (length (window-list)) 2))
+                (should (eq (window-buffer bottom) other))
+                (with-current-buffer buffer (dirdiff-quit))
+                (should-not (buffer-live-p buffer))
+                (should (equal (mapcar #'window-buffer (window-list))
+                               (list left-dired right-dired other))))
+            (when (buffer-live-p buffer) (kill-buffer buffer))
+            (mapc #'kill-buffer (list other left-dired right-dired))))))))
+
 ;; Request: v visits in this window, o in the other one.
 (ert-deftest dirdiff-test-visit ()
   (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2") ("new" . "n"))

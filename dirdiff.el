@@ -129,6 +129,15 @@ buffer, which leaves magit's windows as they were.  Quitting with
                  (const :tag "New frame" t)
                  (const :tag "New frame when started from magit" magit)))
 
+(defcustom dirdiff-replace-dired-windows t
+  "Non-nil means a comparison of two directories shown in Dired replaces them.
+When both directories are shown in Dired windows in the selected frame,
+the comparison takes the place of both windows, and quitting it with
+\\<dirdiff-mode-map>\\[dirdiff-quit] restores the windows as they were.
+This does not apply when the comparison gets a new frame (see
+`dirdiff-new-frame')."
+  :type 'boolean)
+
 (defcustom dirdiff-frame-parameters '((fullscreen . maximized))
   "Frame parameters for the frames made according to `dirdiff-new-frame'."
   :type '(alist :key-type symbol :value-type sexp))
@@ -549,6 +558,8 @@ Changed directories are not; their contents are."
 (defvar-local dirdiff--rows [] "Vector of (NODE . DEPTH), one per line.")
 (defvar-local dirdiff--cell-overlay nil)
 (defvar-local dirdiff--marker-overlay nil)
+(defvar-local dirdiff--window-configuration nil
+  "The window configuration to restore when quitting, or nil.")
 
 (defun dirdiff--current-node ()
   "Return the node on the current line, or nil."
@@ -1120,9 +1131,13 @@ The file is moved to the trash if `delete-by-moving-to-trash' is non-nil."
 
 (defun dirdiff-quit ()
   "Quit the comparison and kill its buffer.
-If the comparison has its own frame, delete it."
+If the comparison has its own frame, delete it.  If it replaced two
+Dired windows, restore them (see `dirdiff-replace-dired-windows')."
   (interactive)
-  (quit-window t))
+  (let ((config dirdiff--window-configuration))
+    (quit-window t)
+    (when config
+      (set-window-configuration config))))
 
 ;;;; Mode
 
@@ -1245,12 +1260,40 @@ copy, delete and visit act on it.
       (setf (dirdiff-session-cleanup session) nil)
       (mapc #'funcall functions))))
 
+(defun dirdiff--new-frame-p ()
+  "Non-nil if a comparison started now gets a new frame."
+  (if (eq dirdiff-new-frame 'magit)
+      (derived-mode-p 'magit-mode)
+    dirdiff-new-frame))
+
+(defun dirdiff--dired-window (dir)
+  "Return a window of the selected frame showing DIR in Dired, or nil."
+  (let ((dir (file-truename (file-name-as-directory dir))))
+    (cl-find-if (lambda (window)
+                  (with-current-buffer (window-buffer window)
+                    (and (derived-mode-p 'dired-mode)
+                         (equal (file-truename default-directory) dir))))
+                (window-list nil 'no-minibuf))))
+
+(defun dirdiff--replace-dired-windows (left right)
+  "Make room for comparing LEFT and RIGHT where they are shown in Dired.
+If both directories are shown in Dired windows, delete the right one,
+so that the left one takes its space, and select the left one.
+Return the window configuration from before, or nil if nothing was
+done.  See `dirdiff-replace-dired-windows'."
+  (let ((left-window (dirdiff--dired-window left))
+        (right-window (dirdiff--dired-window right)))
+    (when (and dirdiff-replace-dired-windows
+               left-window right-window (not (eq left-window right-window))
+               (not (dirdiff--new-frame-p)))
+      (prog1 (current-window-configuration)
+        (delete-window right-window)
+        (select-window left-window)))))
+
 (defun dirdiff-show-session (session &optional buffer-name)
   "Compare the sides of SESSION and display the result.
 BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
-  (let ((new-frame (if (eq dirdiff-new-frame 'magit)
-                       (derived-mode-p 'magit-mode)
-                     dirdiff-new-frame))
+  (let ((new-frame (dirdiff--new-frame-p))
         (buffer (generate-new-buffer
                  (or buffer-name
                      (format "*dirdiff %s ↔ %s*"
@@ -1318,12 +1361,18 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
 ;;;###autoload
 (defun dirdiff (left right)
   "Compare LEFT and RIGHT: two directories side by side, two files with ediff.
-In Dired with exactly two marked entries, those are compared."
+In Dired with exactly two marked entries, those are compared.  When
+both directories are shown in Dired windows, the comparison replaces
+them until it is quit (see `dirdiff-replace-dired-windows')."
   (interactive (dirdiff--read-paths))
   (cond ((and (file-directory-p left) (file-directory-p right))
-         (dirdiff-show-session
-          (dirdiff-session-create :left (dirdiff--dir-source left t)
-                                  :right (dirdiff--dir-source right t))))
+         (let* ((config (dirdiff--replace-dired-windows left right))
+                (buffer (dirdiff-show-session
+                         (dirdiff-session-create :left (dirdiff--dir-source left t)
+                                                 :right (dirdiff--dir-source right t)))))
+           (with-current-buffer buffer
+             (setq dirdiff--window-configuration config))
+           buffer))
         ((not (or (file-directory-p left) (file-directory-p right)))
          (ediff-files left right))
         (t (user-error "Cannot compare a file with a directory"))))

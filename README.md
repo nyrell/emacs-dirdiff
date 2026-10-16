@@ -55,6 +55,10 @@ line:
 | `M-x dirdiff-dired` | the two directories marked in the visible Dired windows |
 | `M-x dirdiff-git` | git revisions, with `git difftool -d` syntax: `A..B`, `A...B`, `C^!` (a commit with its parent), `A` (with the working tree), or empty (`HEAD` with the working tree) |
 
+When both directories are shown in Dired windows, side by side for
+example, the comparison takes the place of both, and `q` restores the
+windows as they were (`dirdiff-replace-dired-windows`).
+
 ### Keys in the dirdiff buffer
 
 One side is *active*: its cell on the current row is highlighted and
@@ -190,6 +194,7 @@ described [above](#installation). Ready-made launchers:
 - `dirdiff-binary-comparison`
 - `dirdiff-hide-identical`
 - `dirdiff-initial-expansion` — `changed` (default), `all` or `none`
+- `dirdiff-replace-dired-windows` — `t` (default) or `nil`
 - `dirdiff-new-frame` — `magit` (default: new frame when started from
   magit), `t` (always) or `nil` (never); `dirdiff-frame-parameters`
 - faces `dirdiff-same`, `dirdiff-changed`, `dirdiff-new`, `dirdiff-absent`,
