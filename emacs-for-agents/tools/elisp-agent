@@ -1,5 +1,0 @@
-#!/bin/sh
-# elisp-agent -- batch checks for coding agents writing Emacs Lisp.
-# Usage: elisp-agent [OPTIONS] check|forms|indent|describe|builtins|info|eval|test ...  (see ../tools.md)
-dir=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
-exec "${EMACS:-emacs}" --batch -Q -l "$dir/elisp-agent.el" -f elisp-agent-main "$@"
