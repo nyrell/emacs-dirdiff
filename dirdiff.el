@@ -1092,12 +1092,11 @@ that DEST changes, if any.  Replacing something asks with
                            (dirdiff--other-side to)
                            (if (file-symlink-p dest) "" " (when you quit)"))))
      (t
-      (yes-or-no-p (format "The current %s will be %s.  Replace %s on the %s side? "
-                           (if (dirdiff--entry-dir-p existing) "directory" "file")
-                           (if delete-by-moving-to-trash
-                               "moved to the trash"
-                             "deleted permanently")
-                           name to))))))
+      (yes-or-no-p (format (if delete-by-moving-to-trash
+                               "Copy %s to the %s side, moving the %s there to the trash? "
+                             "Copy %s to the %s side, deleting the %s there permanently? ")
+                           name to
+                           (if (dirdiff--entry-dir-p existing) "directory" "file")))))))
 
 (defun dirdiff-copy-to-right ()
   "Copy the current file or directory from the left side to the right side."

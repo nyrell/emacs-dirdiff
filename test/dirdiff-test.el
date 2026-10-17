@@ -342,9 +342,19 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
           (dirdiff-test--goto "g")
           (dirdiff-copy-to-right))
         (should (equal (nreverse prompts)
-                       '("The current file will be moved to the trash.  Replace f on the right side? "
-                         "The current file will be deleted permanently.  Replace f on the right side? "
+                       '("Copy f to the right side, moving the file there to the trash? "
+                         "Copy f to the right side, deleting the file there permanently? "
                          "Copy g to the right side? ")))
+        ;; A directory replacing a file says so.
+        (setq prompts nil)
+        (dirdiff-test--write left '(("d/x" . "x")))
+        (dirdiff-test--write right '(("d" . "file")))
+        (dirdiff-refresh)
+        (dirdiff-test--goto "d")
+        (cl-letf (((symbol-function 'yes-or-no-p) (lambda (p) (push p prompts) nil)))
+          (let ((delete-by-moving-to-trash t))
+            (dirdiff-copy-to-right)))
+        (should (equal prompts '("Copy d/ to the right side, moving the file there to the trash? ")))
         ;; Declined, so nothing changed.
         (should (equal (dirdiff-test--read (expand-file-name "f" right)) "old"))
         (should-not (file-exists-p (expand-file-name "g" right)))))))
