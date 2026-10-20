@@ -1394,6 +1394,8 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
   "o" #'dirdiff-find-file-other-window
   "n" #'dirdiff-next-difference
   "p" #'dirdiff-previous-difference
+  "M-<down>" #'dirdiff-next-difference
+  "M-<up>" #'dirdiff-previous-difference
   "^" #'dirdiff-up
   "+" #'dirdiff-expand-all
   "-" #'dirdiff-collapse-all

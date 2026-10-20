@@ -69,7 +69,7 @@ deleting act on it.
 |---|---|
 | `TAB`, click | switch active side |
 | `RET`, double-click | ediff the file pair (a file on one side only is compared with an empty file) / expand or collapse the directory |
-| `n`, `p` | next / previous difference (expands directories as needed) |
+| `n`, `p` (also `M-<down>`, `M-<up>`) | next / previous difference (expands directories as needed) |
 | `^` | parent directory |
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
 | `=` | hide or show identical entries |

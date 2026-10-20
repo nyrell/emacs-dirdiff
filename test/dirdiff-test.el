@@ -281,6 +281,8 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
   (should (eq (keymap-lookup dirdiff-mode-map "M-<left>") #'dirdiff-copy-to-left))
   (should (eq (keymap-lookup dirdiff-mode-map "b") #'dirdiff-copy-to-left))
   (should (eq (keymap-lookup dirdiff-mode-map "!") #'dirdiff-refresh))
+  (should (eq (keymap-lookup dirdiff-mode-map "M-<down>") #'dirdiff-next-difference))
+  (should (eq (keymap-lookup dirdiff-mode-map "M-<up>") #'dirdiff-previous-difference))
   (should (eq (keymap-lookup dirdiff-mode-map "s") #'dirdiff-toggle-ignore-whitespace))
   (should (eq (keymap-lookup dirdiff-mode-map "w") #'dirdiff-copy-filename-as-kill)))
 
