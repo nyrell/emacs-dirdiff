@@ -1238,12 +1238,40 @@ left by git, which does not list empty directories)."
                         (reverse dirdiff--kept) ", "))))
 
 (defun dirdiff--copy (from)
-  "Copy the current entry from side FROM to the other side."
+  "Copy the current entry from side FROM to the other side.
+If it does not exist on side FROM, delete it on the other side."
+  (if (dirdiff--node-entry (dirdiff--node-at-point) from)
+      (dirdiff--copy-entry from)
+    (dirdiff--copy-deletion from)))
+
+(defun dirdiff--copy-deletion (from)
+  "Delete the current entry on the side other than FROM, where it is missing."
+  (let* ((node (dirdiff--node-at-point))
+         (to (dirdiff--other-side from))
+         (entry (dirdiff--node-entry node to))
+         (name (concat (dirdiff-node-rel node) (if (dirdiff--entry-dir-p entry) "/" ""))))
+    (dirdiff--writable-path node to)
+    (unless (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session to)) t)
+      (user-error "Cannot delete on the %s side" to))
+    (when (dirdiff--opaque-p entry)
+      (user-error "The contents of %s are not compared, so it cannot be deleted" name))
+    (dirdiff--check-readable node)
+    (when (yes-or-no-p (format (if delete-by-moving-to-trash
+                                   "%s is not on the %s side; move it on the %s side to the trash? "
+                                 "%s is not on the %s side; delete it on the %s side permanently? ")
+                               name from to))
+      (let ((dirdiff--kept nil))
+        (dirdiff--remove node to)
+        (dirdiff--refresh-node dirdiff--session node)
+        (dirdiff--render)
+        (dirdiff--report-kept)))))
+
+(defun dirdiff--copy-entry (from)
+  "Copy the current entry, which exists on side FROM, to the other side."
   (let* ((node (dirdiff--node-at-point))
          (rel (dirdiff-node-rel node))
          (to (dirdiff--other-side from))
-         (entry (or (dirdiff--node-entry node from)
-                    (user-error "Nothing to copy: %s does not exist on the %s side" rel from)))
+         (entry (dirdiff--node-entry node from))
          (dest (dirdiff--writable-path node to))
          (existing (dirdiff--node-entry node to))
          (source (dirdiff--session-source dirdiff--session to))
@@ -1303,12 +1331,14 @@ that DEST changes, if any.  Replacing something asks with
                            (if (dirdiff--entry-dir-p existing) "directory" "file")))))))
 
 (defun dirdiff-copy-to-right ()
-  "Copy the current file or directory from the left side to the right side."
+  "Copy the current file or directory from the left side to the right side.
+If it is only on the right side, delete it there."
   (interactive)
   (dirdiff--copy 'left))
 
 (defun dirdiff-copy-to-left ()
-  "Copy the current file or directory from the right side to the left side."
+  "Copy the current file or directory from the right side to the left side.
+If it is only on the left side, delete it there."
   (interactive)
   (dirdiff--copy 'right))
 

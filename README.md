@@ -78,7 +78,7 @@ deleting act on it.
 | `x` | ignore the executable bit on/off |
 | `B` | compare binary files byte by byte, or trust the same size and time |
 | `g`, `!` | compare again |
-| `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (for directories, what differs; see below) |
+| `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (for directories, what differs; see below); if it is missing on the side copied from, delete it on the other side |
 | `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
 | `v` | visit the file on the active side in this window |
 | `o` | visit the file on the active side in another window |

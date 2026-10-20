@@ -464,11 +464,31 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
         (should-not (file-exists-p (expand-file-name "d" left)))
         (should-not (dirdiff-test--find dirdiff--session "d"))))))
 
-(ert-deftest dirdiff-test-copy-nothing ()
-  (dirdiff-test--with-dirs '() '(("r" . "r"))
-    (dirdiff-test--in-buffer (dirdiff-test--session left right)
-      (dirdiff-test--goto "r")
-      (should-error (dirdiff-copy-to-right) :type 'user-error))))
+;; Request: copying from a side where the entry is missing copies the
+;; deletion, asking like overwriting does.
+(ert-deftest dirdiff-test-copy-deletion ()
+  (dirdiff-test--with-dirs '() '(("r" . "r") ("d/x" . "x"))
+    (let ((delete-by-moving-to-trash nil))
+      (dirdiff-test--in-buffer (dirdiff-test--session left right)
+        (let (prompts)
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (p) (push p prompts) nil)))
+            (dirdiff-test--goto "r")
+            (dirdiff-copy-to-right))
+          (should (equal prompts
+                         '("r is not on the left side; delete it on the right side permanently? ")))
+          (should (file-exists-p (expand-file-name "r" right))))
+        (dirdiff-copy-to-right)
+        (should-not (file-exists-p (expand-file-name "r" right)))
+        (should-not (dirdiff-test--find dirdiff--session "r"))
+        (dirdiff-test--goto "d")
+        (dirdiff-copy-to-right)
+        (should-not (file-exists-p (expand-file-name "d" right)))
+        ;; Revision sides and git difftool copies cannot be changed.
+        (setf (dirdiff-source-writable (dirdiff-session-right dirdiff--session)) 'working-tree)
+        (dirdiff-test--write right '(("w" . "w")))
+        (dirdiff-refresh)
+        (dirdiff-test--goto "w")
+        (should-error (dirdiff-copy-to-right) :type 'user-error)))))
 
 (ert-deftest dirdiff-test-replace-asks-for-confirmation ()
   (dirdiff-test--with-dirs '(("f" . "new") ("g" . "g")) '(("f" . "old"))
