@@ -73,15 +73,16 @@ deleting act on it.
 | `^` | parent directory |
 | `+`, `-`, `*` | expand all / collapse all / expand directories with differences |
 | `=` | hide or show identical entries |
-| `w` | ignore whitespace on/off (also used by ediff) |
+| `s` | ignore whitespace on/off (also used by ediff) |
 | `e` | ignore line endings (CRLF vs LF) on/off (also used by ediff) |
 | `x` | ignore the executable bit on/off |
-| `b` | compare binary files byte by byte, or by size and time only |
-| `g` | compare again |
-| `>`, `<` | copy the entry to the right / left side (directories are replaced) |
+| `B` | compare binary files byte by byte, or by size and time only |
+| `g`, `!` | compare again |
+| `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (directories are replaced) |
 | `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
 | `v` | visit the file on the active side in this window |
 | `o` | visit the file on the active side in another window |
+| `w` | copy the entry's name, like Dired: `C-u w` relative to the compared directories, `C-0 w` the full name (`REV:PATH` for a git revision) |
 | `?` | menu with all commands |
 | `q` | quit |
 
@@ -97,7 +98,7 @@ in the executable bit are ignored; `e` and `x` turn that off, shown as
 When you quit an ediff started from dirdiff, it asks whether to save the
 files you changed, then compares them again
 (`dirdiff-save-after-ediff`: `ask`, `t` or `nil`). Binary files (with a NUL byte in the first 8000 bytes) are by
-default compared by size and modification time only; press `b` or set
+default compared by size and modification time only; press `B` or set
 `dirdiff-binary-comparison` to `full` to compare them byte by byte.
 
 ## Git

@@ -260,6 +260,9 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
 (cl-defgeneric dirdiff-source-copy-to (source entry rel dest)
   "Copy ENTRY at REL in SOURCE to the local file name DEST.")
 
+(cl-defgeneric dirdiff-source-name (source rel)
+  "Return the full name of REL in SOURCE, for `dirdiff-copy-filename-as-kill'.")
+
 (defun dirdiff--fs-entry (file &optional attrs)
   "Return a `dirdiff-entry' for FILE on disk, using ATTRS if given."
   (let* ((attrs (or attrs (file-attributes file)))
@@ -300,6 +303,12 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
 (cl-defmethod dirdiff-source-file ((_source dirdiff-dir-source) entry _rel)
   "Return the file of ENTRY itself."
   (dirdiff-entry-file entry))
+
+(cl-defmethod dirdiff-source-name ((source dirdiff-dir-source) rel)
+  "Return the absolute file name of REL, in the working tree for git difftool."
+  (or (and (eq (dirdiff-source-writable source) 'working-tree)
+           (dirdiff--working-tree-file source rel))
+      (expand-file-name rel (dirdiff-dir-source-root source))))
 
 (cl-defmethod dirdiff-source-copy-to ((_source dirdiff-dir-source) entry _rel dest)
   "Copy ENTRY's file to DEST, keeping times and permissions."
@@ -1018,6 +1027,26 @@ If it only exists on the other side, visit that."
   (interactive)
   (dirdiff--visit #'find-file-other-window))
 
+(defun dirdiff-copy-filename-as-kill (&optional arg)
+  "Copy the name of the entry at point into the kill ring, like Dired.
+With no prefix ARG, copy the name without its directory.  With a
+zero prefix (\\`C-0 w'), copy the full name on the active side, or
+on the other side if it only exists there; for a git revision that
+is REV:PATH.  With any other prefix, copy the name relative to the
+compared directories."
+  (interactive "P")
+  (let* ((node (dirdiff--node-at-point))
+         (side (if (dirdiff--node-entry node dirdiff--side)
+                   dirdiff--side
+                 (dirdiff--other-side dirdiff--side)))
+         (name (cond ((eq arg 0)
+                      (dirdiff-source-name (dirdiff--session-source dirdiff--session side)
+                                           (dirdiff-node-rel node)))
+                     (arg (dirdiff-node-rel node))
+                     (t (dirdiff-node-name node)))))
+    (kill-new name)
+    (message "%s" name)))
+
 ;;;; Commands: editing
 
 (defun dirdiff--writable-path (node side)
@@ -1154,13 +1183,14 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
    ["Open"
     ("RET" "Ediff / toggle directory" dirdiff-open)
     ("v" "Visit" dirdiff-find-file)
-    ("o" "Visit in other window" dirdiff-find-file-other-window)]]
+    ("o" "Visit in other window" dirdiff-find-file-other-window)
+    ("w" "Copy file name" dirdiff-copy-filename-as-kill)]]
   [["Show and compare"
     ("=" "Hide identical (toggle)" dirdiff-toggle-hide-identical :transient t)
-    ("w" "Ignore whitespace (toggle)" dirdiff-toggle-ignore-whitespace :transient t)
+    ("s" "Ignore whitespace (toggle)" dirdiff-toggle-ignore-whitespace :transient t)
     ("e" "Ignore line endings (toggle)" dirdiff-toggle-ignore-line-endings :transient t)
     ("x" "Ignore executable bit (toggle)" dirdiff-toggle-ignore-modes :transient t)
-    ("b" "Binary files: full/quick (toggle)" dirdiff-toggle-binary-comparison :transient t)
+    ("B" "Binary files: full/quick (toggle)" dirdiff-toggle-binary-comparison :transient t)
     ("g" "Refresh" dirdiff-refresh :transient t)]
    ["Edit"
     (">" "Copy left to right" dirdiff-copy-to-right)
@@ -1186,13 +1216,19 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
   "-" #'dirdiff-collapse-all
   "*" #'dirdiff-expand-changed
   "=" #'dirdiff-toggle-hide-identical
-  "w" #'dirdiff-toggle-ignore-whitespace
+  "w" #'dirdiff-copy-filename-as-kill
+  "s" #'dirdiff-toggle-ignore-whitespace
   "e" #'dirdiff-toggle-ignore-line-endings
   "x" #'dirdiff-toggle-ignore-modes
-  "b" #'dirdiff-toggle-binary-comparison
+  "B" #'dirdiff-toggle-binary-comparison
   "g" #'dirdiff-refresh
+  "!" #'dirdiff-refresh
   ">" #'dirdiff-copy-to-right
   "<" #'dirdiff-copy-to-left
+  "M-<right>" #'dirdiff-copy-to-right
+  "M-<left>" #'dirdiff-copy-to-left
+  "a" #'dirdiff-copy-to-right
+  "b" #'dirdiff-copy-to-left
   "d" #'dirdiff-delete
   "q" #'dirdiff-quit
   "?" #'dirdiff-dispatch)
@@ -1207,6 +1243,7 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
     ["Ediff / toggle directory" dirdiff-open]
     ["Visit" dirdiff-find-file]
     ["Visit in other window" dirdiff-find-file-other-window]
+    ["Copy file name" dirdiff-copy-filename-as-kill]
     "---"
     ["Expand all" dirdiff-expand-all]
     ["Collapse all" dirdiff-collapse-all]

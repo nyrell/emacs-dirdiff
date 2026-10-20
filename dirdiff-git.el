@@ -173,6 +173,10 @@
       (set-file-modes file #o444))
     file))
 
+(cl-defmethod dirdiff-source-name ((source dirdiff-git-source) rel)
+  "Return REV:REL, which git commands accept."
+  (format "%s:%s" (dirdiff-git-source-rev source) rel))
+
 (cl-defmethod dirdiff-source-copy-to ((source dirdiff-git-source) entry rel dest)
   "Write ENTRY at REL of revision SOURCE to DEST, recursively."
   (let ((repo (dirdiff-git-source-repo source)))

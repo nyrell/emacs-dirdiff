@@ -274,6 +274,35 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
   "Move to the row of the node at REL, expanding directories as needed."
   (dirdiff--goto-node (dirdiff-test--find dirdiff--session rel)))
 
+(ert-deftest dirdiff-test-keys ()
+  (should (eq (keymap-lookup dirdiff-mode-map "M-<right>") #'dirdiff-copy-to-right))
+  (should (eq (keymap-lookup dirdiff-mode-map "a") #'dirdiff-copy-to-right))
+  (should (eq (keymap-lookup dirdiff-mode-map "M-<left>") #'dirdiff-copy-to-left))
+  (should (eq (keymap-lookup dirdiff-mode-map "b") #'dirdiff-copy-to-left))
+  (should (eq (keymap-lookup dirdiff-mode-map "!") #'dirdiff-refresh))
+  (should (eq (keymap-lookup dirdiff-mode-map "s") #'dirdiff-toggle-ignore-whitespace))
+  (should (eq (keymap-lookup dirdiff-mode-map "w") #'dirdiff-copy-filename-as-kill)))
+
+(ert-deftest dirdiff-test-copy-filename ()
+  (dirdiff-test--with-dirs '(("d/f" . "1")) '(("d/f" . "2") ("d/r" . "r"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (let ((kill-ring nil))
+        (dirdiff-test--goto "d/f")
+        (dirdiff-copy-filename-as-kill)
+        (should (equal (current-kill 0) "f"))
+        (dirdiff-copy-filename-as-kill '(4))
+        (should (equal (current-kill 0) "d/f"))
+        (dirdiff-copy-filename-as-kill 0)
+        (should (equal (current-kill 0) (expand-file-name "d/f" left)))
+        (dirdiff--set-side 'right)
+        (dirdiff-copy-filename-as-kill 0)
+        (should (equal (current-kill 0) (expand-file-name "d/f" right)))
+        ;; Only on the right: the right name even when the left is active.
+        (dirdiff--set-side 'left)
+        (dirdiff-test--goto "d/r")
+        (dirdiff-copy-filename-as-kill 0)
+        (should (equal (current-kill 0) (expand-file-name "d/r" right)))))))
+
 (ert-deftest dirdiff-test-copy-file ()
   (dirdiff-test--with-dirs '(("f" . "left") ("only/deep/new" . "n")) '(("f" . "right"))
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
@@ -719,6 +748,20 @@ With IGNORE-WHITESPACE, ignore whitespace."
         (should-error (dirdiff-delete) :type 'user-error))
       ;; Killing the buffer removed the extracted files.
       (should-not (file-exists-p file)))))
+
+(ert-deftest dirdiff-test-git-copy-filename ()
+  (dirdiff-test--with-repo
+    (let ((s (dirdiff-test--git-session repo "HEAD~1" nil)))
+      (dirdiff-test--in-buffer s
+        (let ((kill-ring nil))
+          (dirdiff-test--goto "dir/g")
+          (dirdiff-copy-filename-as-kill 0)
+          (should (equal (current-kill 0)
+                         (concat (string-trim (dirdiff-git--run repo "rev-parse" "HEAD~1")) ":dir/g")))
+          (dirdiff-test--goto "a.txt")
+          (dirdiff--set-side 'right)
+          (dirdiff-copy-filename-as-kill 0)
+          (should (equal (current-kill 0) (expand-file-name "a.txt" repo))))))))
 
 (defun dirdiff-test--local-file (session rel side)
   "Return the local file of the node of SESSION at REL on SIDE."
