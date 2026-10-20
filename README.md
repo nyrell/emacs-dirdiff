@@ -90,11 +90,8 @@ There is also a *Dirdiff* menu in the menu bar.
 
 Copying a directory onto a directory changes only what differs: entries
 that compare as identical are left alone, and so are entries that are
-not compared at all (such as `.git`, or files ignored by git), so a
+not compared at all (`dirdiff-ignored-names`, such as `.git`), so a
 replaced or deleted directory stays if it still holds such entries.
-Submodules are never copied or deleted; use git in them. A file copied
-from a git revision is written as `git checkout` would write it
-(`.gitattributes` line endings, filters such as git-lfs).
 
 ### Comparing
 
@@ -119,7 +116,10 @@ Revisions are listed with `git ls-tree`, and which files differ comes from
 `git diff --raw`, so even large repositories are compared quickly. File
 contents are extracted (read-only, to a temporary directory) only when a
 file is opened. Revision sides are read-only: copy and delete only work on
-the working tree.
+the working tree. A file copied from a revision is written as
+`git checkout` would write it (`.gitattributes` line endings, filters
+such as git-lfs). Submodules are shown as single entries; their contents
+are not compared, copied or deleted.
 
 Git comparisons hide identical entries initially, so they look like
 `git difftool -d`; press `=` to see the whole tree

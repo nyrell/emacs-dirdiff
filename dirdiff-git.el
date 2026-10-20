@@ -147,7 +147,7 @@ from .gitattributes, and filters such as git-lfs."
           (let* ((mode (match-string 1 record))
                  (size (match-string 4 record))
                  (entry (dirdiff-entry-create
-                         :type (cond ((equal (match-string 2 record) "commit") 'module)
+                         :type (cond ((equal (match-string 2 record) "commit") 'opaque) ; submodule
                                      ((equal mode "120000") 'link)
                                      (t 'file))
                          :id (match-string 3 record)
@@ -207,9 +207,6 @@ Files are written as git checkout would write them."
                                dest t)
          ;; Like git checkout: a file holding the target.
          (dirdiff-git--write-blob repo (dirdiff-entry-id entry) dest)))
-      ('module
-       (make-directory dest t)
-       (message "Submodule %s: only the directory was created" rel))
       (_
        (dirdiff-git--write-blob repo (dirdiff-entry-id entry) dest rel)
        (when (equal (dirdiff-entry-mode entry) "100755")

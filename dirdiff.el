@@ -180,11 +180,14 @@ This does not apply when the comparison gets a new frame (see
 (cl-defstruct (dirdiff-entry (:constructor dirdiff-entry-create)
                              (:copier nil))
   "What exists at a path on one side."
-  type   ; `file', `dir', `link' (symlink not followed) or `module'
+  type   ; `file', `dir', `link' (symlink not followed) or `opaque'
   file   ; local file name, or nil when not on disk (git revision)
   size mtime
   id     ; git object id, when known
   mode)  ; git file mode string, when known
+
+;; An `opaque' entry is a directory whose contents a source does not
+;; list.  It is not compared entry by entry, and not copied or deleted.
 
 (cl-defstruct (dirdiff-node (:constructor dirdiff-node-create)
                             (:copier nil))
@@ -297,9 +300,9 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
         (let ((kind (and only (gethash (file-name-concat rel (car f)) only))))
           (when (if only kind (not (member (car f) dirdiff-ignored-names)))
             (let ((entry (dirdiff--fs-entry (expand-file-name (car f) dir) (cdr f))))
-              ;; A directory that git lists as a file is a submodule.
+              ;; Listed as a file, but a directory on disk.
               (when (and (eq kind 'file) (eq (dirdiff-entry-type entry) 'dir))
-                (setf (dirdiff-entry-type entry) 'module))
+                (setf (dirdiff-entry-type entry) 'opaque))
               (push (cons (car f) entry) result))))))
     result))
 
@@ -403,7 +406,7 @@ It is what the session's `prepare' function returned.")
                          (equal (dirdiff--link-target l (file 'left))
                                 (dirdiff--link-target r (file 'right))))
                     'same 'changed))
-               ((or (eq lt 'module) (eq rt 'module)) 'changed)
+               ((or (eq lt 'opaque) (eq rt 'opaque)) 'changed)
                ((and (not (dirdiff-session-ignore-modes session))
                      (not (eq (dirdiff--executable-p l) (dirdiff--executable-p r))))
                 'changed)
@@ -1027,14 +1030,15 @@ A file that exists on one side only is diffed with an empty file."
       (dirdiff--render))
      (t
       (let* ((types (mapcar #'dirdiff-entry-type (delq nil (list l r))))
-             (what (cond ((memq 'module types) "Submodule")
-                         ((memq 'link types) "Symbolic link")
+             (what (cond ((memq 'link types) "Symbolic link")
                          ((cl-some (lambda (side)
                                      (when-let* ((file (dirdiff--local-file node side)))
                                        (dirdiff--binary-file-p file)))
                                    '(left right))
                           "Binary file"))))
         (cond
+         ((memq 'opaque types)
+          (message "The contents of %s are not compared" (dirdiff-node-rel node)))
          (what
           (message "%s" (pcase (dirdiff-node-status node)
                           ('same (format "%ss are identical" what))
@@ -1074,11 +1078,10 @@ A file that exists on one side only is diffed with an empty file."
                    dirdiff--side
                  (dirdiff--other-side dirdiff--side)))
          (entry (dirdiff--node-entry node side)))
-    (when (and (memq (dirdiff-entry-type entry) '(dir module))
+    (when (and (memq (dirdiff-entry-type entry) '(dir opaque))
                (not (dirdiff-entry-file entry)))
-      (user-error "%s is a %s in %s, not on disk"
+      (user-error "%s/ in %s is not on disk"
                   (dirdiff-node-rel node)
-                  (if (dirdiff--module-p entry) "submodule" "directory")
                   (dirdiff-source-label (dirdiff--session-source dirdiff--session side))))
     (funcall find-file (dirdiff--local-file node side))))
 
@@ -1149,9 +1152,9 @@ Respects `delete-by-moving-to-trash'."
   (expand-file-name (dirdiff-node-rel node)
                     (dirdiff-dir-source-root (dirdiff--session-source dirdiff--session side))))
 
-(defun dirdiff--module-p (entry)
-  "Non-nil if ENTRY is a git submodule."
-  (and entry (eq (dirdiff-entry-type entry) 'module)))
+(defun dirdiff--opaque-p (entry)
+  "Non-nil if ENTRY is a directory whose contents are not compared."
+  (and entry (eq (dirdiff-entry-type entry) 'opaque)))
 
 (defun dirdiff--check-readable (node)
   "Signal a `user-error' if a directory in NODE could not be read."
@@ -1163,13 +1166,13 @@ Respects `delete-by-moving-to-trash'."
 
 (defun dirdiff--remove (node side)
   "Delete NODE's entry on SIDE, as far as the comparison lists it.
-Entries in a directory that are not compared (such as .git or files
-ignored by git) are kept, and so is the directory then; so are
-submodules.  What is kept is added to `dirdiff--kept'."
+Entries in a directory that are not compared (such as .git, see
+`dirdiff-ignored-names') are kept, and so is the directory then; so
+are opaque entries.  What is kept is added to `dirdiff--kept'."
   (let ((entry (dirdiff--node-entry node side))
         (file (dirdiff--path node side)))
     (pcase (dirdiff-entry-type entry)
-      ('module (push (cons (dirdiff-node-rel node) "submodule") dirdiff--kept))
+      ('opaque (push (cons (dirdiff-node-rel node) "contents not compared") dirdiff--kept))
       ('dir
        (dolist (child (dirdiff-node-children node))
          (when (dirdiff--node-entry child side)
@@ -1184,8 +1187,8 @@ submodules.  What is kept is added to `dirdiff--kept'."
   "Make NODE's entry on side TO the same as on side FROM.
 Entries that compare as identical are left alone, unless FORCE is
 non-nil.  Directories are changed entry by entry, so that what is not
-compared stays (see `dirdiff--remove'); submodules, and entries that
-were created on side TO after comparing, are left alone too."
+compared stays (see `dirdiff--remove'); opaque entries, and entries
+that were created on side TO after comparing, are left alone too."
   (let ((entry (dirdiff--node-entry node from))
         (existing (dirdiff--node-entry node to))
         (dest (dirdiff--path node to))
@@ -1193,8 +1196,8 @@ were created on side TO after comparing, are left alone too."
     (cond
      ((and (not force) (eq (dirdiff-node-status node) 'same)))
      ((not entry) (dirdiff--remove node to))
-     ((or (dirdiff--module-p entry) (dirdiff--module-p existing))
-      (push (cons rel "submodule") dirdiff--kept))
+     ((or (dirdiff--opaque-p entry) (dirdiff--opaque-p existing))
+      (push (cons rel "contents not compared") dirdiff--kept))
      ;; Not there when compared, or a name differing only in case on a
      ;; case-insensitive file system.
      ((and (not existing) (dirdiff--in-the-way-p entry dest))
@@ -1249,8 +1252,8 @@ left by git, which does not list empty directories)."
                                      existing (eq (dirdiff-entry-type existing) 'file)
                                      (dirdiff--working-tree-file source rel))
                                 (user-error "Only files from the working tree can be changed here")))))
-    (when (or (dirdiff--module-p entry) (dirdiff--module-p existing))
-      (user-error "%s is a submodule; use git in it to change it" rel))
+    (when (or (dirdiff--opaque-p entry) (dirdiff--opaque-p existing))
+      (user-error "The contents of %s are not compared, so it cannot be copied" rel))
     (dirdiff--check-readable node)
     (when (and (not existing) (dirdiff--in-the-way-p entry dest))
       (user-error "%s exists on the %s side now; compare again first"
@@ -1323,8 +1326,9 @@ not (such as .git) are kept, and so is the directory then."
     (dirdiff--writable-path node side)
     (unless (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session side)) t)
       (user-error "Cannot delete on the %s side" side))
-    (when (dirdiff--module-p entry)
-      (user-error "%s is a submodule; use git to remove it" (dirdiff-node-rel node)))
+    (when (dirdiff--opaque-p entry)
+      (user-error "The contents of %s are not compared, so it cannot be deleted"
+                  (dirdiff-node-rel node)))
     (dirdiff--check-readable node)
     (when (yes-or-no-p (format "Delete %s%s on the %s side? "
                                (dirdiff-node-rel node)

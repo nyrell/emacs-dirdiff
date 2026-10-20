@@ -356,21 +356,21 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
         ;; Both sides still have d/, but only the left one has files.
         (should (eq (dirdiff-test--status dirdiff--session "d/a") 'left))))))
 
-;; Review: copying or deleting a submodule wiped its checkout.
-(ert-deftest dirdiff-test-submodules-are-not-touched ()
+;; Review: copying or deleting a git submodule wiped its checkout.
+(ert-deftest dirdiff-test-opaque-entries-are-not-touched ()
   (dirdiff-test--with-dirs '(("m/f" . "1") ("d/m/f" . "1") ("d/x" . "new"))
       '(("m/f" . "2") ("d/m/f" . "2") ("d/x" . "old"))
     (let ((delete-by-moving-to-trash nil))
       (dirdiff-test--in-buffer (dirdiff-test--session left right)
         (dolist (rel '("m" "d/m"))
           (let ((node (dirdiff-test--find dirdiff--session rel)))
-            (setf (dirdiff-entry-type (dirdiff-node-right node)) 'module
+            (setf (dirdiff-entry-type (dirdiff-node-right node)) 'opaque
                   (dirdiff-node-children node) nil)))
         (dirdiff-test--goto "m")
         (should-error (dirdiff-copy-to-right) :type 'user-error)
         (dirdiff--set-side 'right)
         (should-error (dirdiff-delete) :type 'user-error)
-        ;; Inside a directory, a submodule is left alone.
+        ;; Inside a directory, an opaque entry is left alone.
         (dirdiff-test--goto "d")
         (dirdiff-copy-to-right)
         (should (equal (dirdiff-test--read (expand-file-name "d/x" right)) "new"))
