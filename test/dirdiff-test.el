@@ -153,11 +153,12 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
     (let ((s (dirdiff-test--session left right :binary-comparison 'full)))
       (should (eq (dirdiff-test--status s "same-size.bin") 'changed))
       (should (eq (dirdiff-test--status s "identical.bin") 'same)))
-    ;; Different times: quick reports a difference.
+    ;; Different times: quick compares the contents.
     (set-file-times (expand-file-name "identical.bin" right) (current-time))
-    (should (eq (dirdiff-test--status
-                 (dirdiff-test--session left right :binary-comparison 'quick) "identical.bin")
-                'changed))))
+    (set-file-times (expand-file-name "same-size.bin" right) (current-time))
+    (let ((s (dirdiff-test--session left right :binary-comparison 'quick)))
+      (should (eq (dirdiff-test--status s "identical.bin") 'same))
+      (should (eq (dirdiff-test--status s "same-size.bin") 'changed)))))
 
 (ert-deftest dirdiff-test-ignored-names ()
   (dirdiff-test--with-dirs '((".git/HEAD" . "a") ("CVS/x" . "x") ("f" . "f"))
@@ -326,6 +327,117 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
       (dirdiff-copy-to-right)
       (should (equal (directory-files (expand-file-name "d" right) nil "\\`[^.]") '("a" "b")))
       (should (eq (dirdiff-test--status dirdiff--session "d") 'same)))))
+
+;; Review: replacing or deleting a directory removed what the
+;; comparison does not show, such as .git.
+(ert-deftest dirdiff-test-copy-directory-keeps-uncompared ()
+  (dirdiff-test--with-dirs '(("d/a" . "a") ("d/same" . "s"))
+      '(("d/a" . "old") ("d/same" . "s") ("d/extra" . "x") ("d/.git/HEAD" . "h"))
+    (let ((delete-by-moving-to-trash nil)
+          (time (encode-time '(0 0 12 1 1 2020 nil nil t))))
+      (set-file-times (expand-file-name "d/same" right) time)
+      (dirdiff-test--in-buffer (dirdiff-test--session left right)
+        (dirdiff-test--goto "d")
+        (dirdiff-copy-to-right)
+        (should (equal (directory-files (expand-file-name "d" right) nil "\\`[^.]")
+                       '("a" "same")))
+        (should (equal (dirdiff-test--read (expand-file-name "d/a" right)) "a"))
+        (should (file-exists-p (expand-file-name "d/.git/HEAD" right)))
+        ;; Identical files are left alone.
+        (should (time-equal-p (file-attribute-modification-time
+                               (file-attributes (expand-file-name "d/same" right)))
+                              time))
+        ;; Deleting keeps .git, and so the directory.
+        (dirdiff--set-side 'right)
+        (let ((messages (dirdiff-test--messages #'dirdiff-delete)))
+          (should (cl-some (lambda (m) (string-match-p "Left alone: d/" m)) messages)))
+        (should (equal (directory-files (expand-file-name "d" right) nil "\\`[^.]") nil))
+        (should (file-exists-p (expand-file-name "d/.git/HEAD" right)))
+        ;; Both sides still have d/, but only the left one has files.
+        (should (eq (dirdiff-test--status dirdiff--session "d/a") 'left))))))
+
+;; Review: copying or deleting a submodule wiped its checkout.
+(ert-deftest dirdiff-test-submodules-are-not-touched ()
+  (dirdiff-test--with-dirs '(("m/f" . "1") ("d/m/f" . "1") ("d/x" . "new"))
+      '(("m/f" . "2") ("d/m/f" . "2") ("d/x" . "old"))
+    (let ((delete-by-moving-to-trash nil))
+      (dirdiff-test--in-buffer (dirdiff-test--session left right)
+        (dolist (rel '("m" "d/m"))
+          (let ((node (dirdiff-test--find dirdiff--session rel)))
+            (setf (dirdiff-entry-type (dirdiff-node-right node)) 'module
+                  (dirdiff-node-children node) nil)))
+        (dirdiff-test--goto "m")
+        (should-error (dirdiff-copy-to-right) :type 'user-error)
+        (dirdiff--set-side 'right)
+        (should-error (dirdiff-delete) :type 'user-error)
+        ;; Inside a directory, a submodule is left alone.
+        (dirdiff-test--goto "d")
+        (dirdiff-copy-to-right)
+        (should (equal (dirdiff-test--read (expand-file-name "d/x" right)) "new"))
+        (should (equal (dirdiff-test--read (expand-file-name "d/m/f" right)) "2"))
+        (should (equal (dirdiff-test--read (expand-file-name "m/f" right)) "2"))))))
+
+;; Review: copy decided from the comparison, not from what is on disk.
+(ert-deftest dirdiff-test-copy-checks-disk ()
+  (dirdiff-test--with-dirs '(("f" . "new") ("d/g" . "g")) '()
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (dirdiff-test--write right '(("f" . "made later") ("d/other" . "o")))
+      (dirdiff-test--goto "f")
+      (should-error (dirdiff-copy-to-right) :type 'user-error)
+      (should (equal (dirdiff-test--read (expand-file-name "f" right)) "made later"))
+      (dirdiff-test--goto "d")
+      (should-error (dirdiff-copy-to-right) :type 'user-error)
+      ;; An empty directory is fine.
+      (delete-file (expand-file-name "d/other" right))
+      (dirdiff-copy-to-right)
+      (should (equal (dirdiff-test--read (expand-file-name "d/g" right)) "g")))))
+
+;; Review: an unreadable directory aborted the whole comparison.
+(ert-deftest dirdiff-test-unreadable-directory ()
+  (skip-unless (not (zerop (user-uid))))
+  (dirdiff-test--with-dirs '(("locked/f" . "1") ("ok" . "1")) '(("locked/f" . "1") ("ok" . "2"))
+    (let ((locked (expand-file-name "locked" left)))
+      (set-file-modes locked #o000)
+      (unwind-protect
+          (let ((s (dirdiff-test--session left right)))
+            (should (eq (dirdiff-test--status s "ok") 'changed))
+            (should (eq (dirdiff-test--status s "locked") 'changed))
+            (should (dirdiff-node-error (dirdiff-test--find s "locked")))
+            (should (string-match-p "could not read locked/" (dirdiff--summary s)))
+            (dirdiff-test--in-buffer s
+              (should (string-match-p "(unreadable)" (buffer-string)))
+              (dirdiff-test--goto "locked")
+              (should-error (dirdiff-copy-to-left) :type 'user-error)))
+        (set-file-modes locked #o755)))))
+
+(ert-deftest dirdiff-test-control-characters-in-names ()
+  (dirdiff-test--with-dirs '(("a\nb" . "1") ("c" . "1")) '(("a\nb" . "2") ("c" . "2"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (should (= (count-lines (point-min) (point-max)) 2))
+      (should (string-match-p "a\\^Jb" (buffer-string))))))
+
+;; Review: the whitespace and line ending options did not reach ediff.
+(ert-deftest dirdiff-test-ediff-options ()
+  (require 'ediff)
+  (dirdiff-test--with-dirs '(("f" . "a b\n")) '(("f" . "a  b\n"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right :ignore-whitespace t
+                                                    :ignore-line-endings t)
+      (let ((before (default-value 'ediff-actual-diff-options))
+            options)
+        (cl-letf (((symbol-function 'ediff-files)
+                   (lambda (&rest _)
+                     (setq options (default-value 'ediff-actual-diff-options)))))
+          (dirdiff-test--goto "f")
+          (dirdiff-open))
+        (should (string-match-p "-w" options))
+        (should (string-match-p "--strip-trailing-cr" options))
+        (should (equal (default-value 'ediff-actual-diff-options) before))))))
+
+(ert-deftest dirdiff-test-find-node ()
+  (dirdiff-test--with-dirs '(("a/b/c" . "1")) '(("a/b/c" . "2"))
+    (let ((s (dirdiff-test--session left right)))
+      (should (eq (dirdiff--find-node s "a/b/c") (dirdiff-test--find s "a/b/c")))
+      (should-not (dirdiff--find-node s "a/x")))))
 
 (ert-deftest dirdiff-test-copy-to-left-and-conflict ()
   (dirdiff-test--with-dirs '(("x" . "file")) '(("x/inner" . "i"))
@@ -501,6 +613,25 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
             (mapc #'kill-buffer (list other left-dired right-dired))))))))
 
 ;; Request: v visits in this window, o in the other one.
+(ert-deftest dirdiff-test-replace-dired-windows-error ()
+  (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2"))
+    (save-window-excursion
+      (delete-other-windows)
+      (let* ((right-window (split-window nil nil 'right))
+             (left-dired (dired-noselect left))
+             (right-dired (dired-noselect right)))
+        (set-window-buffer (selected-window) left-dired)
+        (set-window-buffer right-window right-dired)
+        (unwind-protect
+            (progn
+              ;; C-g while comparing takes the same path as an error.
+              (cl-letf (((symbol-function 'dirdiff--build-tree)
+                         (lambda (&rest _) (error "Boom"))))
+                (should-error (with-current-buffer left-dired (dirdiff left right))))
+              (should (equal (mapcar #'window-buffer (window-list))
+                             (list left-dired right-dired))))
+          (mapc #'kill-buffer (list left-dired right-dired)))))))
+
 (ert-deftest dirdiff-test-visit ()
   (dirdiff-test--with-dirs '(("f" . "1")) '(("f" . "2") ("new" . "n"))
     (dirdiff-test--in-buffer (dirdiff-test--session left right)
@@ -573,7 +704,16 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
           (should-not command-line-args-left)
           (kill-buffer buffer)
           (should (equal scheduled '(save-buffers-kill-emacs))))
-        (should-error (dirdiff-difftool-command-line))))))
+        (should-error (dirdiff-difftool-command-line)))
+      ;; Without --dir-diff, git passes two files: ediff them.
+      (let ((command-line-args-left '("left/f" "right/f"))
+            (ediff-quit-hook nil)
+            compared)
+        (cl-letf (((symbol-function 'ediff-files)
+                   (lambda (a b &rest _) (setq compared (list a b)))))
+          (dirdiff-difftool-command-line))
+        (should (equal compared (list (expand-file-name "f" left) (expand-file-name "f" right))))
+        (should (memq #'dirdiff--exit ediff-quit-hook))))))
 
 ;; Bug: git difftool's left side is a temporary snapshot and its right
 ;; side links into the working tree, yet both were fully writable.
@@ -748,6 +888,40 @@ With IGNORE-WHITESPACE, ignore whitespace."
         (should-error (dirdiff-delete) :type 'user-error))
       ;; Killing the buffer removed the extracted files.
       (should-not (file-exists-p file)))))
+
+(ert-deftest dirdiff-test-git-visit-revision-directory ()
+  (dirdiff-test--with-repo
+    (dirdiff-test--in-buffer (dirdiff-test--git-session repo "HEAD~1" nil)
+      (dirdiff-test--goto "dir")
+      (should-error (dirdiff-find-file) :type 'user-error))))
+
+;; Review: copying from a revision skipped .gitattributes conversion.
+(ert-deftest dirdiff-test-git-copy-applies-attributes ()
+  (dirdiff-test--with-repo
+    (cl-flet ((git (&rest args) (apply #'dirdiff-git--run repo args)))
+      (dirdiff-test--write repo '((".gitattributes" . "*.txt eol=crlf\n")))
+      (git "add" ".gitattributes")
+      (git "commit" "-q" "-m" "3")
+      (delete-file (expand-file-name "a.txt" repo))
+      (dirdiff-test--in-buffer (dirdiff-test--git-session repo "HEAD" nil)
+        (dirdiff-test--goto "a.txt")
+        (dirdiff-copy-to-right)
+        (should (equal (dirdiff-test--read (expand-file-name "a.txt" repo)) "a\r\nc\r\n"))))))
+
+;; Review: extracted revision files were left behind when Emacs exited.
+(ert-deftest dirdiff-test-git-cleanup-on-exit ()
+  (dirdiff-test--with-repo
+    (let* ((s (dirdiff-test--git-session repo "HEAD~1" nil))
+           (file (dirdiff-test--local-file s "a.txt" 'left))
+           (buffer (dirdiff-show-session s))
+           (visiting (find-file-noselect file)))
+      (unwind-protect
+          (progn
+            (should (memq #'dirdiff--cleanup-all kill-emacs-hook))
+            (dirdiff--cleanup-all)
+            (should-not (file-exists-p file))
+            (should-not (buffer-live-p visiting)))
+        (kill-buffer buffer)))))
 
 (ert-deftest dirdiff-test-git-copy-filename ()
   (dirdiff-test--with-repo

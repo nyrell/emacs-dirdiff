@@ -57,7 +57,7 @@
 (declare-function dired-get-marked-files "dired")
 (declare-function dired-marker-regexp "dired")
 (declare-function dired-dwim-target-directory "dired-aux")
-(defvar ediff-diff-options)
+(defvar ediff-actual-diff-options)
 (defvar ediff-after-quit-hook-internal)
 
 ;;;; Customization
@@ -100,9 +100,10 @@ the files as saved on disk."
 
 (defcustom dirdiff-binary-comparison 'quick
   "How to compare binary files.
-`quick' compares size and modification time only.  `full' compares
-the contents byte by byte."
-  :type '(choice (const :tag "Size and modification time" quick)
+`quick' takes files with the same size and modification time to be
+identical, and compares other files of the same size byte by byte.
+`full' always compares the contents byte by byte."
+  :type '(choice (const :tag "Trust size and modification time" quick)
                  (const :tag "Contents, byte by byte" full)))
 
 (defcustom dirdiff-hide-identical nil
@@ -188,9 +189,11 @@ This does not apply when the comparison gets a new frame (see
 (cl-defstruct (dirdiff-node (:constructor dirdiff-node-create)
                             (:copier nil))
   "A row in the comparison: a relative path and both sides of it."
-  name rel parent left right status children)
+  name rel parent left right status children error)
 ;; STATUS is `same', `changed', `left' (left only), `right' (right
 ;; only) or `conflict' (file on one side, directory on the other).
+;; ERROR is the message of a directory that could not be read; then
+;; it has no children and its status is `changed'.
 
 (cl-defstruct (dirdiff-source (:constructor nil) (:copier nil))
   "Where one side of the comparison comes from.
@@ -305,7 +308,8 @@ REL is relative to the root of SOURCE; the root itself is \"\".")
   (dirdiff-entry-file entry))
 
 (cl-defmethod dirdiff-source-name ((source dirdiff-dir-source) rel)
-  "Return the absolute file name of REL, in the working tree for git difftool."
+  "Return the absolute file name of REL in SOURCE.
+For git difftool's copies and links, return the working tree file."
   (or (and (eq (dirdiff-source-writable source) 'working-tree)
            (dirdiff--working-tree-file source rel))
       (expand-file-name rel (dirdiff-dir-source-root source))))
@@ -353,7 +357,7 @@ PROGRAM with ARGS, if it is available."
   "Compare local files A and B using the options of SESSION.
 Return `same' or `changed'.  QUICK nil means that the modification
 times of A and B cannot be compared, so binary files are compared
-byte by byte even if SESSION says to compare them quickly."
+byte by byte even if SESSION says to trust size and time."
   (let* ((attrs-a (file-attributes (file-truename a)))
          (attrs-b (file-attributes (file-truename b)))
          (sa (file-attribute-size attrs-a))
@@ -364,9 +368,10 @@ byte by byte even if SESSION says to compare them quickly."
       (let ((binary (or (dirdiff--binary-file-p a) (dirdiff--binary-file-p b))))
         (if (cond
              ((and binary (not (eql sa sb))) nil)
-             ((and binary quick (eq (dirdiff-session-binary-comparison session) 'quick))
-              (time-equal-p (file-attribute-modification-time attrs-a)
-                            (file-attribute-modification-time attrs-b)))
+             ((and binary quick (eq (dirdiff-session-binary-comparison session) 'quick)
+                   (time-equal-p (file-attribute-modification-time attrs-a)
+                                 (file-attribute-modification-time attrs-b)))
+              t)
              ((and (not binary) (dirdiff-session-ignore-whitespace session))
               (dirdiff--equal-p a b sizes "diff" '("-q" "-w") #'dirdiff--strip-whitespace))
              ((and (not binary) (dirdiff-session-ignore-line-endings session))
@@ -427,6 +432,7 @@ For a link in a git revision, FILE holds the target as its contents."
     (cond ((not r) 'left)
           ((not l) 'right)
           ((not (eq (dirdiff--entry-dir-p l) (dirdiff--entry-dir-p r))) 'conflict)
+          ((dirdiff-node-error node) 'changed)
           ((cl-every (lambda (c) (eq (dirdiff-node-status c) 'same))
                      (dirdiff-node-children node))
            'same)
@@ -455,12 +461,22 @@ For a link in a git revision, FILE holds the target as its contents."
                                 (dirdiff-node-rel node))))
 
 (defun dirdiff--build-children (session node)
-  "Compare the contents of directory NODE in SESSION; return its children."
+  "Compare the contents of directory NODE in SESSION; return its children.
+If a side cannot be read, set NODE's error and return nil."
   (let ((right (make-hash-table :test #'equal))
-        children)
-    (pcase-dolist (`(,name . ,entry) (dirdiff--child-entries session 'right node))
-      (puthash name entry right))
-    (pcase-dolist (`(,name . ,entry) (dirdiff--child-entries session 'left node))
+        left children)
+    (setf (dirdiff-node-error node) nil)
+    (condition-case err
+        (setq left (dirdiff--child-entries session 'left node))
+      (file-error (setf (dirdiff-node-error node) (error-message-string err))))
+    (condition-case err
+        (pcase-dolist (`(,name . ,entry) (dirdiff--child-entries session 'right node))
+          (puthash name entry right))
+      (file-error (setf (dirdiff-node-error node) (error-message-string err))))
+    (when (dirdiff-node-error node)
+      (setq left nil)
+      (clrhash right))
+    (pcase-dolist (`(,name . ,entry) left)
       (push (dirdiff--build-node session node name entry (gethash name right)) children)
       (remhash name right))
     (maphash (lambda (name entry)
@@ -535,7 +551,8 @@ Compare it, and its contents if it is a directory, using SESSION."
 Changed directories are not; their contents are."
   (let ((status (dirdiff-node-status node)))
     (and (not (eq status 'same))
-         (not (and (eq status 'changed) (dirdiff--node-dir-p node)))
+         (not (and (eq status 'changed) (dirdiff--node-dir-p node)
+                   (not (dirdiff-node-error node))))
          ;; Inside a one-sided directory only the directory itself counts.
          (let ((p (dirdiff-node-parent node)))
            (or (null p) (memq (dirdiff-node-status p) '(same changed)))))))
@@ -551,13 +568,31 @@ Changed directories are not; their contents are."
                                      counts)))))
     (setf (dirdiff-session-counts session) counts)))
 
+(defun dirdiff--errors (session)
+  "Return the nodes of SESSION whose directories could not be read."
+  (let (nodes)
+    (when-let* ((root (dirdiff-session-tree session)))
+      (when (dirdiff-node-error root) (push root nodes))
+      (dirdiff--walk root (lambda (node)
+                            (when (dirdiff-node-error node) (push node nodes)))))
+    (nreverse nodes)))
+
 (defun dirdiff--summary (session)
   "Describe the differences in SESSION in words."
-  (pcase-let ((`(,changed ,left ,right ,conflict) (dirdiff-session-counts session)))
-    (if (= 0 changed left right conflict)
-        "identical"
-      (format "%d changed, %d left only, %d right only%s" changed left right
-              (if (> conflict 0) (format ", %d conflicts" conflict) "")))))
+  (pcase-let ((`(,changed ,left ,right ,conflict) (dirdiff-session-counts session))
+              (errors (dirdiff--errors session)))
+    (concat
+     (if (= 0 changed left right conflict)
+         "identical"
+       (format "%d changed, %d left only, %d right only%s" changed left right
+               (if (> conflict 0) (format ", %d conflicts" conflict) "")))
+     (and errors
+          (format "; could not read %s"
+                  (mapconcat (lambda (node)
+                               (if (equal (dirdiff-node-rel node) "")
+                                   (dirdiff-node-error node)
+                                 (concat (dirdiff-node-rel node) "/")))
+                             errors ", "))))))
 
 ;;;; Buffer state
 
@@ -632,11 +667,17 @@ Changed directories are not; their contents are."
                        (propertize (concat (cond ((not dir) "  ")
                                                  ((dirdiff--open-p node) "▾ ")
                                                  (t "▸ "))
-                                           (dirdiff-node-name node)
-                                           (cond (dir "/") ((eq type 'link) "@")))
+                                           (dirdiff--display-name (dirdiff-node-name node))
+                                           (cond (dir "/") ((eq type 'link) "@"))
+                                           (and (dirdiff-node-error node) " (unreadable)"))
                                    'face (dirdiff--face node side)))))
     (propertize (truncate-string-to-width text dirdiff--width nil ?\s "…")
                 'dirdiff-side side)))
+
+(defun dirdiff--display-name (name)
+  "Return NAME with control characters (such as newlines) shown as ^X."
+  (replace-regexp-in-string "[\0-\37\177]" (lambda (c) (text-char-description (aref c 0)))
+                            name t t))
 
 (defun dirdiff--row (node depth)
   "Return the line of text for NODE at DEPTH."
@@ -866,7 +907,7 @@ With BACKWARD, move to the previous one."
   (dirdiff-refresh))
 
 (defun dirdiff-toggle-ignore-modes ()
-  "Toggle ignoring changes of the executable bit, and compare again."
+  "Toggle ignoring a changed executable bit, and compare again."
   (interactive)
   (cl-callf not (dirdiff-session-ignore-modes dirdiff--session))
   (dirdiff-refresh))
@@ -905,11 +946,15 @@ A side where the file is missing is shown as an empty, read-only file."
          (buffer (current-buffer))
          (config (current-window-configuration))
          (session dirdiff--session)
-         (ediff-diff-options
-          (string-trim (concat ediff-diff-options
-                               (and (dirdiff-session-ignore-whitespace session) " -w")
-                               (and (dirdiff-session-ignore-line-endings session)
-                                    " --strip-trailing-cr"))))
+         (rel (dirdiff-node-rel node))
+         ;; ediff copies these options into its control buffer, which
+         ;; does not exist yet, from their default value.
+         (old-options (default-value 'ediff-actual-diff-options))
+         (options (string-trim
+                   (concat old-options
+                           (and (dirdiff-session-ignore-whitespace session) " -w")
+                           (and (dirdiff-session-ignore-line-endings session)
+                                " --strip-trailing-cr"))))
          (after-quit
           (lambda ()
             (set-window-configuration config)
@@ -921,18 +966,33 @@ A side where the file is missing is shown as an empty, read-only file."
               (delete-directory absent-dir t))
             (when (buffer-live-p buffer)
               (with-current-buffer buffer
-                (dirdiff--refresh-node dirdiff--session node)
+                ;; The tree may have been rebuilt (`g') meanwhile.
+                (when-let* ((node (dirdiff--find-node dirdiff--session rel)))
+                  (dirdiff--refresh-node dirdiff--session node))
                 (dirdiff--render))))))
-    (ediff-files left right
-                 (list (lambda ()
-                         (when-let* ((b (and absent (get-file-buffer absent))))
-                           (with-current-buffer b (setq buffer-read-only t)))
-                         ;; ediff ignores the global value of this hook
-                         ;; once it has a local one, so include it.
-                         (setq-local ediff-after-quit-hook-internal
-                                     (append (remq t (default-value
-                                                      'ediff-after-quit-hook-internal))
-                                             (list after-quit))))))))
+    (unwind-protect
+        (progn
+          (setq-default ediff-actual-diff-options options)
+          (ediff-files left right
+                       (list (lambda ()
+                               ;; Also for ediff's own re-comparing (`!').
+                               (setq-local ediff-actual-diff-options options)
+                               (when-let* ((b (and absent (get-file-buffer absent))))
+                                 (with-current-buffer b (setq buffer-read-only t)))
+                               ;; ediff ignores the global value of this hook
+                               ;; once it has a local one, so include it.
+                               (setq-local ediff-after-quit-hook-internal
+                                           (append (remq t (default-value
+                                                            'ediff-after-quit-hook-internal))
+                                                   (list after-quit)))))))
+      (setq-default ediff-actual-diff-options old-options))))
+
+(defun dirdiff--find-node (session rel)
+  "Return the node of SESSION at relative name REL, or nil."
+  (let ((node (dirdiff-session-tree session)))
+    (dolist (name (split-string rel "/" t) node)
+      (setq node (and node (cl-find name (dirdiff-node-children node)
+                                    :key #'dirdiff-node-name :test #'equal))))))
 
 (defun dirdiff--save-after-ediff (session left right)
   "Save the changed buffers of files LEFT and RIGHT of SESSION.
@@ -1012,7 +1072,14 @@ A file that exists on one side only is diffed with an empty file."
   (let* ((node (dirdiff--node-at-point))
          (side (if (dirdiff--node-entry node dirdiff--side)
                    dirdiff--side
-                 (dirdiff--other-side dirdiff--side))))
+                 (dirdiff--other-side dirdiff--side)))
+         (entry (dirdiff--node-entry node side)))
+    (when (and (memq (dirdiff-entry-type entry) '(dir module))
+               (not (dirdiff-entry-file entry)))
+      (user-error "%s is a %s in %s, not on disk"
+                  (dirdiff-node-rel node)
+                  (if (dirdiff--module-p entry) "submodule" "directory")
+                  (dirdiff-source-label (dirdiff--session-source dirdiff--session side))))
     (funcall find-file (dirdiff--local-file node side))))
 
 (defun dirdiff-find-file ()
@@ -1074,37 +1141,137 @@ Respects `delete-by-moving-to-trash'."
       (delete-directory file t t)
     (delete-file file t)))
 
+(defvar dirdiff--kept nil
+  "While copying or deleting: what was left alone, as (REL . REASON).")
+
+(defun dirdiff--path (node side)
+  "Return the local file name of NODE on SIDE, a directory source."
+  (expand-file-name (dirdiff-node-rel node)
+                    (dirdiff-dir-source-root (dirdiff--session-source dirdiff--session side))))
+
+(defun dirdiff--module-p (entry)
+  "Non-nil if ENTRY is a git submodule."
+  (and entry (eq (dirdiff-entry-type entry) 'module)))
+
+(defun dirdiff--check-readable (node)
+  "Signal a `user-error' if a directory in NODE could not be read."
+  (let ((nodes (list node)))
+    (dirdiff--walk node (lambda (n) (push n nodes)))
+    (when-let* ((bad (cl-find-if #'dirdiff-node-error nodes)))
+      (user-error "%s/ could not be read: %s"
+                  (dirdiff-node-rel bad) (dirdiff-node-error bad)))))
+
+(defun dirdiff--remove (node side)
+  "Delete NODE's entry on SIDE, as far as the comparison lists it.
+Entries in a directory that are not compared (such as .git or files
+ignored by git) are kept, and so is the directory then; so are
+submodules.  What is kept is added to `dirdiff--kept'."
+  (let ((entry (dirdiff--node-entry node side))
+        (file (dirdiff--path node side)))
+    (pcase (dirdiff-entry-type entry)
+      ('module (push (cons (dirdiff-node-rel node) "submodule") dirdiff--kept))
+      ('dir
+       (dolist (child (dirdiff-node-children node))
+         (when (dirdiff--node-entry child side)
+           (dirdiff--remove child side)))
+       (if (directory-empty-p file)
+           (delete-directory file nil t)
+         (push (cons (concat (dirdiff-node-rel node) "/") "has entries that are not compared")
+               dirdiff--kept)))
+      (_ (delete-file file t)))))
+
+(defun dirdiff--sync (node from to &optional force)
+  "Make NODE's entry on side TO the same as on side FROM.
+Entries that compare as identical are left alone, unless FORCE is
+non-nil.  Directories are changed entry by entry, so that what is not
+compared stays (see `dirdiff--remove'); submodules, and entries that
+were created on side TO after comparing, are left alone too."
+  (let ((entry (dirdiff--node-entry node from))
+        (existing (dirdiff--node-entry node to))
+        (dest (dirdiff--path node to))
+        (rel (dirdiff-node-rel node)))
+    (cond
+     ((and (not force) (eq (dirdiff-node-status node) 'same)))
+     ((not entry) (dirdiff--remove node to))
+     ((or (dirdiff--module-p entry) (dirdiff--module-p existing))
+      (push (cons rel "submodule") dirdiff--kept))
+     ;; Not there when compared, or a name differing only in case on a
+     ;; case-insensitive file system.
+     ((and (not existing) (dirdiff--in-the-way-p entry dest))
+      (push (cons rel "exists there now") dirdiff--kept))
+     ((and (dirdiff--entry-dir-p entry) (dirdiff--entry-dir-p existing))
+      (dolist (child (dirdiff-node-children node))
+        (dirdiff--sync child from to)))
+     ((dirdiff--entry-dir-p entry)
+      (when existing (delete-file dest t))
+      (make-directory dest t)
+      (dolist (child (dirdiff-node-children node))
+        (dirdiff--sync child from to)))
+     (t
+      ;; Replace what is there, so that both sides end up identical (a
+      ;; symlink is replaced, not written through).
+      (when existing (dirdiff--delete-local dest))
+      (dirdiff-source-copy-to (dirdiff--session-source dirdiff--session from)
+                              entry rel dest)))))
+
+(defun dirdiff--in-the-way-p (entry dest)
+  "Non-nil if copying ENTRY to DEST would replace something.
+DEST had nothing when compared.  Something is in the way if DEST was
+created after comparing, or if another
+name differing only in case is there on a case-insensitive file
+system.  An empty directory for a directory is fine (for example one
+left by git, which does not list empty directories)."
+  (and (or (file-exists-p dest) (file-symlink-p dest))
+       (not (and (dirdiff--entry-dir-p entry)
+                 (not (file-symlink-p dest))
+                 (file-directory-p dest)
+                 (directory-empty-p dest)))))
+
+(defun dirdiff--report-kept ()
+  "Say what was left alone, from `dirdiff--kept'."
+  (when dirdiff--kept
+    (message "Left alone: %s"
+             (mapconcat (lambda (kept) (format "%s (%s)" (car kept) (cdr kept)))
+                        (reverse dirdiff--kept) ", "))))
+
 (defun dirdiff--copy (from)
   "Copy the current entry from side FROM to the other side."
   (let* ((node (dirdiff--node-at-point))
+         (rel (dirdiff-node-rel node))
          (to (dirdiff--other-side from))
          (entry (or (dirdiff--node-entry node from)
-                    (user-error "Nothing to copy: %s does not exist on the %s side"
-                                (dirdiff-node-rel node) from)))
+                    (user-error "Nothing to copy: %s does not exist on the %s side" rel from)))
          (dest (dirdiff--writable-path node to))
          (existing (dirdiff--node-entry node to))
          (source (dirdiff--session-source dirdiff--session to))
          (working-tree (and (eq (dirdiff-source-writable source) 'working-tree)
                             (or (and (eq (dirdiff-entry-type entry) 'file)
                                      existing (eq (dirdiff-entry-type existing) 'file)
-                                     (dirdiff--working-tree-file source (dirdiff-node-rel node)))
+                                     (dirdiff--working-tree-file source rel))
                                 (user-error "Only files from the working tree can be changed here")))))
+    (when (or (dirdiff--module-p entry) (dirdiff--module-p existing))
+      (user-error "%s is a submodule; use git in it to change it" rel))
+    (dirdiff--check-readable node)
+    (when (and (not existing) (dirdiff--in-the-way-p entry dest))
+      (user-error "%s exists on the %s side now; compare again first"
+                  (file-name-nondirectory dest) to))
     (when (dirdiff--confirm-copy node entry existing to dest working-tree)
-      ;; Replace what is there, so that both sides end up identical
-      ;; (a symlink is replaced, not written through), except where
-      ;; writing into the working tree file is the point.
-      (when (and existing (not working-tree))
-        (dirdiff--delete-local dest))
-      (make-directory (file-name-directory (directory-file-name dest)) t)
-      (dirdiff-source-copy-to (dirdiff--session-source dirdiff--session from)
-                              entry (dirdiff-node-rel node) dest)
-      ;; The copy keeps the time of the original; with an old time and
-      ;; the same size, git could take a copy for unchanged and not
-      ;; copy it back to the working tree.
-      (when working-tree
-        (set-file-times dest))
-      (dirdiff--refresh-node dirdiff--session node)
-      (dirdiff--render))))
+      (let ((dirdiff--kept nil))
+        (cond
+         (working-tree
+          ;; Write into the working tree file (or git's copy of it).
+          (dirdiff-source-copy-to (dirdiff--session-source dirdiff--session from)
+                                  entry rel dest)
+          ;; The copy keeps the time of the original; with an old time
+          ;; and the same size, git could take a copy for unchanged and
+          ;; not copy it back to the working tree.
+          (set-file-times dest))
+         (t
+          (make-directory (file-name-directory (directory-file-name dest)) t)
+          (dirdiff--sync node from to t)))
+        (dirdiff--refresh-node dirdiff--session node)
+        (dirdiff--render)
+        (dirdiff--report-kept)))))
 
 (defun dirdiff--confirm-copy (node entry existing to dest working-tree)
   "Ask whether to copy ENTRY of NODE to side TO, at local file DEST.
@@ -1120,6 +1287,11 @@ that DEST changes, if any.  Replacing something asks with
                            (abbreviate-file-name working-tree)
                            (dirdiff--other-side to)
                            (if (file-symlink-p dest) "" " (when you quit)"))))
+     ((and (dirdiff--entry-dir-p entry) (dirdiff--entry-dir-p existing))
+      (yes-or-no-p (format (if delete-by-moving-to-trash
+                               "Copy %s to the %s side, moving what differs there to the trash? "
+                             "Copy %s to the %s side, deleting what differs there permanently? ")
+                           name to)))
      (t
       (yes-or-no-p (format (if delete-by-moving-to-trash
                                "Copy %s to the %s side, moving the %s there to the trash? "
@@ -1139,23 +1311,30 @@ that DEST changes, if any.  Replacing something asks with
 
 (defun dirdiff-delete ()
   "Delete the current file or directory on the active side.
-The file is moved to the trash if `delete-by-moving-to-trash' is non-nil."
+The file is moved to the trash if `delete-by-moving-to-trash' is non-nil.
+In a directory, only what is compared is deleted; entries that are
+not (such as .git) are kept, and so is the directory then."
   (interactive)
   (let* ((node (dirdiff--node-at-point))
          (side dirdiff--side)
          (entry (or (dirdiff--node-entry node side)
                     (user-error "%s does not exist on the %s side"
-                                (dirdiff-node-rel node) side)))
-         (file (dirdiff--writable-path node side)))
+                                (dirdiff-node-rel node) side))))
+    (dirdiff--writable-path node side)
     (unless (eq (dirdiff-source-writable (dirdiff--session-source dirdiff--session side)) t)
       (user-error "Cannot delete on the %s side" side))
+    (when (dirdiff--module-p entry)
+      (user-error "%s is a submodule; use git to remove it" (dirdiff-node-rel node)))
+    (dirdiff--check-readable node)
     (when (yes-or-no-p (format "Delete %s%s on the %s side? "
                                (dirdiff-node-rel node)
                                (if (dirdiff--entry-dir-p entry) "/ and its contents" "")
                                side))
-      (dirdiff--delete-local file)
-      (dirdiff--refresh-node dirdiff--session node)
-      (dirdiff--render))))
+      (let ((dirdiff--kept nil))
+        (dirdiff--remove node side)
+        (dirdiff--refresh-node dirdiff--session node)
+        (dirdiff--render)
+        (dirdiff--report-kept)))))
 
 (defun dirdiff-quit ()
   "Quit the comparison and kill its buffer.
@@ -1239,6 +1418,7 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
     ["Next difference" dirdiff-next-difference]
     ["Previous difference" dirdiff-previous-difference]
     ["Switch side" dirdiff-switch-side]
+    ["Parent directory" dirdiff-up]
     "---"
     ["Ediff / toggle directory" dirdiff-open]
     ["Visit" dirdiff-find-file]
@@ -1287,7 +1467,8 @@ copy, delete and visit act on it.
   (setq header-line-format '("" header-line-indent (:eval (dirdiff--header-line))))
   (add-hook 'post-command-hook #'dirdiff--post-command nil t)
   (add-hook 'window-size-change-functions #'dirdiff--window-size-change nil t)
-  (add-hook 'kill-buffer-hook #'dirdiff--cleanup nil t))
+  (add-hook 'kill-buffer-hook #'dirdiff--cleanup nil t)
+  (add-hook 'kill-emacs-hook #'dirdiff--cleanup-all))
 
 (defun dirdiff--cleanup (&optional session)
   "Run the cleanup functions of SESSION (default: the current one), once."
@@ -1295,6 +1476,15 @@ copy, delete and visit act on it.
     (let ((functions (dirdiff-session-cleanup session)))
       (setf (dirdiff-session-cleanup session) nil)
       (mapc #'funcall functions))))
+
+(defun dirdiff--cleanup-all ()
+  "Run the cleanup functions of all comparisons, for `kill-emacs-hook'."
+  (dolist (buffer (buffer-list))
+    ;; Cleaning up can kill buffers visiting extracted files.
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (derived-mode-p 'dirdiff-mode)
+          (dirdiff--cleanup))))))
 
 (defun dirdiff--new-frame-p ()
   "Non-nil if a comparison started now gets a new frame."
@@ -1359,7 +1549,8 @@ BUFFER-NAME defaults to one made from the side labels.  Return the buffer."
     (dirdiff--render)
     (goto-char (point-min))
     (dirdiff--place)
-    (message "%s.  %s" (capitalize (dirdiff--summary session))
+    (message "%s.  %s" (let ((summary (dirdiff--summary session)))
+                         (concat (upcase (substring summary 0 1)) (substring summary 1)))
              (substitute-command-keys "\\<dirdiff-mode-map>\\[dirdiff-dispatch] for commands"))
     buffer))
 
@@ -1403,9 +1594,13 @@ them until it is quit (see `dirdiff-replace-dired-windows')."
   (interactive (dirdiff--read-paths))
   (cond ((and (file-directory-p left) (file-directory-p right))
          (let* ((config (dirdiff--replace-dired-windows left right))
-                (buffer (dirdiff-show-session
-                         (dirdiff-session-create :left (dirdiff--dir-source left t)
-                                                 :right (dirdiff--dir-source right t)))))
+                (buffer (condition-case err
+                            (dirdiff-show-session
+                             (dirdiff-session-create :left (dirdiff--dir-source left t)
+                                                     :right (dirdiff--dir-source right t)))
+                          ((error quit)
+                           (when config (set-window-configuration config))
+                           (signal (car err) (cdr err))))))
            (with-current-buffer buffer
              (setq dirdiff--window-configuration config))
            buffer))
@@ -1437,8 +1632,12 @@ For starting dirdiff from a shell, like meld:
 Directories are compared side by side and files with ediff.  Emacs
 exits when the comparison is quit, asking to save changed files.
 Return the dirdiff buffer, or nil for files."
-  (pcase-let ((`(,left ,right) (dirdiff--command-line-args 'dirdiff-command-line))
-              (dirdiff-new-frame nil))
+  (pcase-let ((`(,left ,right) (dirdiff--command-line-args 'dirdiff-command-line)))
+    (dirdiff--command-line-compare left right)))
+
+(defun dirdiff--command-line-compare (left right)
+  "Compare LEFT and RIGHT with `dirdiff', and exit Emacs when done."
+  (let ((dirdiff-new-frame nil))
     (if (and (file-directory-p left) (file-directory-p right))
         (dirdiff--exit-with (dirdiff left right))
       (add-hook 'ediff-quit-hook #'dirdiff--exit 90)
@@ -1448,16 +1647,21 @@ Return the dirdiff buffer, or nil for files."
 (defun dirdiff-difftool-command-line ()
   "Compare `git difftool --dir-diff's two directories, then exit Emacs.
 They are the next two command line arguments.  In the git config,
-set difftool.dirdiff.cmd to:
+set difftool.dirdiff.cmd to run Emacs like this:
 
-  emacs -f dirdiff-difftool-command-line \"$LOCAL\" \"$REMOTE\"
+  `emacs -f dirdiff-difftool-command-line \"$LOCAL\" \"$REMOTE\"'
 
 Unlike with `dirdiff-command-line', the left side is read-only, and
 on the right side files of the working tree can be changed but not
-added or deleted.  Return the dirdiff buffer."
+added or deleted.  Return the dirdiff buffer.
+
+Without --dir-diff, git passes two files; they are compared with
+ediff, and nil is returned."
   (pcase-let ((`(,left ,right) (dirdiff--command-line-args 'dirdiff-difftool-command-line))
               (dirdiff-new-frame nil))
-    (dirdiff--exit-with (dirdiff-show-session (dirdiff--difftool-session left right)))))
+    (if (and (file-directory-p left) (file-directory-p right))
+        (dirdiff--exit-with (dirdiff-show-session (dirdiff--difftool-session left right)))
+      (dirdiff--command-line-compare left right))))
 
 (defun dirdiff--command-line-args (function)
   "Remove two file names from the command line arguments; return them.

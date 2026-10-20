@@ -24,7 +24,8 @@
 ;;; Code:
 
 ;; Where dirdiff lives.  Not needed once dirdiff is installed as a package.
-(add-to-list 'load-path "/home/common/ws/emacs/emacs-dirdiff")
+(add-to-list 'load-path (expand-file-name ".." (file-name-directory
+                                                (or load-file-name buffer-file-name))))
 
 (autoload 'dirdiff "dirdiff" nil t)
 (autoload 'dirdiff-dired "dirdiff" nil t)
@@ -56,8 +57,6 @@
 ;;     '("D h" "Dirdiff with HEAD" dirdiff-git-against-head))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D w" "Dirdiff with working tree" dirdiff-git-against-worktree))
-;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
-;;     '("D s" "Dirdiff HEAD vs working tree" my/dirdiff-head-vs-worktree)))
 ;;   (transient-append-suffix 'magit-diff '(-1 -1 -1)
 ;;     '("D s" "Dirdiff HEAD vs working tree" my/dirdiff-head-vs-worktree)))
 

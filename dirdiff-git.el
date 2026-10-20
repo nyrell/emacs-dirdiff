@@ -82,19 +82,32 @@
   "Run git with ARGS in REPO; return its NUL-separated output as a list."
   (split-string (apply #'dirdiff-git--run repo args) "\0" t))
 
-(defun dirdiff-git--blob (repo id)
-  "Return the contents of blob ID in REPO as a unibyte string."
+(defun dirdiff-git--blob (repo id &optional path)
+  "Return the contents of blob ID in REPO as a unibyte string.
+With PATH, convert them like a checkout of PATH does: line endings
+from .gitattributes, and filters such as git-lfs."
   (let ((default-directory (file-name-as-directory repo))
         (coding-system-for-read 'no-conversion))
     (with-temp-buffer
       (set-buffer-multibyte nil)
-      (unless (eql 0 (process-file "git" nil t nil "cat-file" "blob" id))
+      (unless (eql 0 (apply #'process-file "git" nil t nil "cat-file"
+                            (if path
+                                (list "--filters" (concat "--path=" path) id)
+                              (list "blob" id))))
         (error "Reading git blob %s failed" id))
       (buffer-string))))
 
-(defun dirdiff-git--write-blob (repo id file)
-  "Write blob ID of REPO to FILE."
-  (let ((contents (dirdiff-git--blob repo id))
+(defun dirdiff-git--symlinks-p (repo)
+  "Non-nil unless core.symlinks is false in REPO (as on Windows)."
+  (let ((default-directory (file-name-as-directory repo)))
+    (not (equal (string-trim (with-output-to-string
+                               (process-file "git" nil standard-output nil
+                                             "config" "--type=bool" "core.symlinks")))
+                "false"))))
+
+(defun dirdiff-git--write-blob (repo id file &optional path)
+  "Write blob ID of REPO to FILE; PATH as in `dirdiff-git--blob'."
+  (let ((contents (dirdiff-git--blob repo id path))
         (coding-system-for-write 'no-conversion))
     (with-temp-file file
       (set-buffer-multibyte nil)
@@ -174,11 +187,12 @@
     file))
 
 (cl-defmethod dirdiff-source-name ((source dirdiff-git-source) rel)
-  "Return REV:REL, which git commands accept."
+  "Return REV:REL for REL in revision SOURCE; git commands accept it."
   (format "%s:%s" (dirdiff-git-source-rev source) rel))
 
 (cl-defmethod dirdiff-source-copy-to ((source dirdiff-git-source) entry rel dest)
-  "Write ENTRY at REL of revision SOURCE to DEST, recursively."
+  "Write ENTRY at REL of revision SOURCE to DEST, recursively.
+Files are written as git checkout would write them."
   (let ((repo (dirdiff-git-source-repo source)))
     (pcase (dirdiff-entry-type entry)
       ('dir
@@ -187,14 +201,17 @@
          (dirdiff-source-copy-to source child (file-name-concat rel name)
                                  (expand-file-name name dest))))
       ('link
-       (make-symbolic-link (decode-coding-string
-                            (dirdiff-git--blob repo (dirdiff-entry-id entry)) 'utf-8)
-                           dest t))
+       (if (dirdiff-git--symlinks-p repo)
+           (make-symbolic-link (decode-coding-string
+                                (dirdiff-git--blob repo (dirdiff-entry-id entry)) 'utf-8)
+                               dest t)
+         ;; Like git checkout: a file holding the target.
+         (dirdiff-git--write-blob repo (dirdiff-entry-id entry) dest)))
       ('module
        (make-directory dest t)
        (message "Submodule %s: only the directory was created" rel))
       (_
-       (dirdiff-git--write-blob repo (dirdiff-entry-id entry) dest)
+       (dirdiff-git--write-blob repo (dirdiff-entry-id entry) dest rel)
        (when (equal (dirdiff-entry-mode entry) "100755")
          (set-file-modes dest #o755))))))
 
@@ -305,9 +322,14 @@ RIGHT-REV nil means the working tree."
      :hide-identical t
      :cleanup (list (lambda ()
                       (dolist (source (list left right))
-                        (when (and (dirdiff-git-source-p source)
-                                   (dirdiff-git-source-tmpdir source))
-                          (delete-directory (dirdiff-git-source-tmpdir source) t))))))))
+                        (when-let* ((tmpdir (and (dirdiff-git-source-p source)
+                                                 (dirdiff-git-source-tmpdir source))))
+                          ;; Also the buffers visiting the extracted files.
+                          (dolist (buffer (buffer-list))
+                            (when (and (buffer-file-name buffer)
+                                       (file-in-directory-p (buffer-file-name buffer) tmpdir))
+                              (kill-buffer buffer)))
+                          (delete-directory tmpdir t))))))))
 
 (defun dirdiff-git-compare (left-rev right-rev &optional directory)
   "Compare LEFT-REV with RIGHT-REV in the git repository of DIRECTORY.

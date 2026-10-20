@@ -76,9 +76,9 @@ deleting act on it.
 | `s` | ignore whitespace on/off (also used by ediff) |
 | `e` | ignore line endings (CRLF vs LF) on/off (also used by ediff) |
 | `x` | ignore the executable bit on/off |
-| `B` | compare binary files byte by byte, or by size and time only |
+| `B` | compare binary files byte by byte, or trust the same size and time |
 | `g`, `!` | compare again |
-| `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (directories are replaced) |
+| `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (for directories, what differs; see below) |
 | `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
 | `v` | visit the file on the active side in this window |
 | `o` | visit the file on the active side in another window |
@@ -87,6 +87,14 @@ deleting act on it.
 | `q` | quit |
 
 There is also a *Dirdiff* menu in the menu bar.
+
+Copying a directory onto a directory changes only what differs: entries
+that compare as identical are left alone, and so are entries that are
+not compared at all (such as `.git`, or files ignored by git), so a
+replaced or deleted directory stays if it still holds such entries.
+Submodules are never copied or deleted; use git in them. A file copied
+from a git revision is written as `git checkout` would write it
+(`.gitattributes` line endings, filters such as git-lfs).
 
 ### Comparing
 
@@ -97,9 +105,13 @@ in the executable bit are ignored; `e` and `x` turn that off, shown as
 
 When you quit an ediff started from dirdiff, it asks whether to save the
 files you changed, then compares them again
-(`dirdiff-save-after-ediff`: `ask`, `t` or `nil`). Binary files (with a NUL byte in the first 8000 bytes) are by
-default compared by size and modification time only; press `B` or set
-`dirdiff-binary-comparison` to `full` to compare them byte by byte.
+(`dirdiff-save-after-ediff`: `ask`, `t` or `nil`).
+
+Binary files (with a NUL byte in the first 8000 bytes) of the same size
+and modification time are by default taken to be identical without
+reading them; others of the same size are compared byte by byte. Press
+`B` or set `dirdiff-binary-comparison` to `full` to always compare them
+byte by byte.
 
 ## Git
 
@@ -209,3 +221,7 @@ emacs --batch -Q -L . --eval '(setq byte-compile-error-on-warn t)' \
 emacs --batch -Q -L . -l test/dirdiff-test.el \
       -f ert-run-tests-batch-and-exit                     # ERT tests
 ```
+
+The magit tests are skipped unless magit can be loaded; to use your
+installed packages, add `-f package-initialize` after `-Q` (and set
+`package-user-dir` first if yours is not the default).
