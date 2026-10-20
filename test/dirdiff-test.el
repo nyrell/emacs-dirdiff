@@ -475,7 +475,7 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
             (dirdiff-test--goto "r")
             (dirdiff-copy-to-right))
           (should (equal prompts
-                         '("r is not on the left side; delete it on the right side permanently? ")))
+                         '("r is only on the right side.  Delete it there permanently? ")))
           (should (file-exists-p (expand-file-name "r" right))))
         (dirdiff-copy-to-right)
         (should-not (file-exists-p (expand-file-name "r" right)))

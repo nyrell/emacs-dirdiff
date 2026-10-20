@@ -1256,10 +1256,11 @@ If it does not exist on side FROM, delete it on the other side."
     (when (dirdiff--opaque-p entry)
       (user-error "The contents of %s are not compared, so it cannot be deleted" name))
     (dirdiff--check-readable node)
-    (when (yes-or-no-p (format (if delete-by-moving-to-trash
-                                   "%s is not on the %s side; move it on the %s side to the trash? "
-                                 "%s is not on the %s side; delete it on the %s side permanently? ")
-                               name from to))
+    (when (yes-or-no-p
+           (format (if delete-by-moving-to-trash
+                       "%s is only on the %s side.  Delete it there, moving it to the trash? "
+                     "%s is only on the %s side.  Delete it there permanently? ")
+                   name to))
       (let ((dirdiff--kept nil))
         (dirdiff--remove node to)
         (dirdiff--refresh-node dirdiff--session node)
