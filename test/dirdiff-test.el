@@ -828,6 +828,32 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
             (with-current-buffer b (set-buffer-modified-p nil))
             (kill-buffer b)))))))
 
+;; Bug: with the right side reached through a symlink and
+;; `find-file-visit-truename', changes there were not saved.
+(ert-deftest dirdiff-test-save-after-ediff-truename ()
+  (dirdiff-test--with-dirs '(("f" . "1\n")) '(("real/f" . "2\n"))
+    (require 'ediff)
+    (let ((link (expand-file-name "link" root))
+          (find-file-visit-truename t)
+          (dirdiff-save-after-ediff t))
+      (make-symbolic-link (expand-file-name "real" right) link)
+      (dirdiff-test--in-buffer (dirdiff-test--session left link)
+        (dirdiff-test--goto "f")
+        (let (startup)
+          (cl-letf (((symbol-function 'ediff-files) (lambda (_a _b s) (setq startup s))))
+            (dirdiff-open))
+          (let ((b (find-file-noselect (expand-file-name "f" link))))
+            (should (equal (buffer-file-name b) (expand-file-name "real/f" right)))
+            (with-current-buffer b
+              (erase-buffer)
+              (insert "1\n"))
+            (with-temp-buffer
+              (mapc #'funcall startup)
+              (funcall (car (last ediff-after-quit-hook-internal))))
+            (should (equal (dirdiff-test--read (expand-file-name "real/f" right)) "1\n"))
+            (should (eq (dirdiff-test--status dirdiff--session "f") 'same))
+            (kill-buffer b)))))))
+
 ;;;; Git
 
 (defmacro dirdiff-test--with-repo (&rest body)

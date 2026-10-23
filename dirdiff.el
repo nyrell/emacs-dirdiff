@@ -964,7 +964,7 @@ A side where the file is missing is shown as an empty, read-only file."
             (dirdiff--save-after-ediff
              session (and (dirdiff-node-left node) left) (and (dirdiff-node-right node) right))
             (when absent
-              (when-let* ((b (get-file-buffer absent)))
+              (when-let* ((b (find-buffer-visiting absent)))
                 (kill-buffer b))
               (delete-directory absent-dir t))
             (when (buffer-live-p buffer)
@@ -980,7 +980,7 @@ A side where the file is missing is shown as an empty, read-only file."
                        (list (lambda ()
                                ;; Also for ediff's own re-comparing (`!').
                                (setq-local ediff-actual-diff-options options)
-                               (when-let* ((b (and absent (get-file-buffer absent))))
+                               (when-let* ((b (and absent (find-buffer-visiting absent))))
                                  (with-current-buffer b (setq buffer-read-only t)))
                                ;; ediff ignores the global value of this hook
                                ;; once it has a local one, so include it.
@@ -1010,7 +1010,7 @@ so are files that cannot be changed on their side."
                                                 source (file-relative-name
                                                         file (dirdiff-dir-source-root source))))
                                               (writable writable))
-                                            (get-file-buffer file))
+                                            (find-buffer-visiting file))
                           when (and buffer (buffer-modified-p buffer))
                           collect buffer)))
     (when (and buffers dirdiff-save-after-ediff)
