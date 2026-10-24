@@ -237,3 +237,7 @@ emacs --batch -Q -L . -l test/dirdiff-test.el \
 The magit tests are skipped unless magit can be loaded; to use your
 installed packages, add `-f package-initialize` after `-Q` (and set
 `package-user-dir` first if yours is not the default).
+
+## License
+
+Public domain ([The Unlicense](LICENSE)).
