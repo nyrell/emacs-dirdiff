@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Mattias Nyrell
 
 ;; Author: Mattias Nyrell <mattias@nyrell.se>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: files, tools, vc
 ;; URL: https://github.com/nyrell/emacs-dirdiff

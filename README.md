@@ -1,4 +1,16 @@
-# dirdiff — compare directory trees side by side in Emacs
+# Dirdiff: Directory comparison like Meld but in Emacs
+
+I have always liked to use the diff tool [Meld](https://meldmerge.org/) to compare the contents of two directories, or with the help of "git difftool" for multifile git commits. I have been looking for something similar for Emacs for a long time but could never find anything, so I finally decided to make this myself.
+
+NOTE: What follows is completely vibecoded, I have not even had time to review the code to any large extent. It behaves well for my current usecases though, but I recommend looking at the code before trusting it with anything important.
+
+The main idea is to provide a directory comparison tool in Emacs, that delegates the individual file compares to `ediff`. Much of the behavior is copied from Meld.
+
+Most of what follows is AI output, so please excuse any AI chatter.
+
+---
+
+dirdiff — compare directory trees side by side in Emacs
 
 Dirdiff does for directories what `ediff-files` does for files, in the
 spirit of [Meld](https://meldmerge.org/): both trees are shown side by side
