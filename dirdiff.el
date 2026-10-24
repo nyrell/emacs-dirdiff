@@ -6,6 +6,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: files, tools, vc
+;; URL: https://github.com/nyrell/emacs-dirdiff
 
 ;; This file is not part of GNU Emacs.
 
