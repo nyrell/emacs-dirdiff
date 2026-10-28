@@ -1088,6 +1088,26 @@ If it only exists on the other side, visit that."
   (interactive)
   (dirdiff--visit #'find-file-other-window))
 
+(defun dirdiff-dired-jump (&optional other-window)
+  "Open Dired on the directory of the current entry on the active side.
+Point is put on the entry, like `dired-jump'.  If the entry is not on
+the active side, open the nearest directory above it that is.  With a
+prefix argument OTHER-WINDOW, use another window."
+  (interactive "P")
+  (let* ((side dirdiff--side)
+         (source (dirdiff--session-source dirdiff--session side))
+         (rel (dirdiff-node-rel (dirdiff--node-at-point))))
+    (unless (dirdiff-dir-source-p source)
+      (user-error "The %s side, %s, is not a directory on disk"
+                  side (dirdiff-source-label source)))
+    (let* ((root (dirdiff-dir-source-root source))
+           (file (expand-file-name rel root)))
+      (if (and (not (string-empty-p rel)) (file-exists-p file))
+          (dired-jump other-window (directory-file-name file))
+        (while (not (file-directory-p file))
+          (setq file (file-name-directory (directory-file-name file))))
+        (funcall (if other-window #'dired-other-window #'dired) file)))))
+
 (defun dirdiff-copy-filename-as-kill (&optional arg)
   "Copy the name of the entry at point into the kill ring, like Dired.
 With no prefix ARG, copy the name without its directory.  With a
@@ -1389,7 +1409,8 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
     ("RET" "Ediff / toggle directory" dirdiff-open)
     ("v" "Visit" dirdiff-find-file)
     ("o" "Visit in other window" dirdiff-find-file-other-window)
-    ("w" "Copy file name" dirdiff-copy-filename-as-kill)]]
+    ("w" "Copy file name" dirdiff-copy-filename-as-kill)
+    ("j" "Dired on active side (C-x C-j)" dirdiff-dired-jump)]]
   [["Show and compare"
     ("=" "Hide identical (toggle)" dirdiff-toggle-hide-identical :transient t)
     ("s" "Ignore whitespace (toggle)" dirdiff-toggle-ignore-whitespace :transient t)
@@ -1400,7 +1421,7 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
    ["Edit"
     (">" "Copy left to right" dirdiff-copy-to-right)
     ("<" "Copy right to left" dirdiff-copy-to-left)
-    ("d" "Delete on active side" dirdiff-delete)]
+    ("D" "Delete on active side" dirdiff-delete)]
    ["Quit"
     ("q" "Quit dirdiff" dirdiff-quit)]])
 
@@ -1437,6 +1458,8 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
   "a" #'dirdiff-copy-to-right
   "b" #'dirdiff-copy-to-left
   "d" #'dirdiff-delete
+  "D" #'dirdiff-delete
+  "C-x C-j" #'dirdiff-dired-jump
   "q" #'dirdiff-quit
   "?" #'dirdiff-dispatch)
 
@@ -1452,6 +1475,7 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
     ["Visit" dirdiff-find-file]
     ["Visit in other window" dirdiff-find-file-other-window]
     ["Copy file name" dirdiff-copy-filename-as-kill]
+    ["Dired on active side" dirdiff-dired-jump]
     "---"
     ["Expand all" dirdiff-expand-all]
     ["Collapse all" dirdiff-collapse-all]

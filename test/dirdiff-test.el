@@ -284,7 +284,30 @@ They are filled from LEFT-SPEC and RIGHT-SPEC, see `dirdiff-test--write'."
   (should (eq (keymap-lookup dirdiff-mode-map "M-<down>") #'dirdiff-next-difference))
   (should (eq (keymap-lookup dirdiff-mode-map "M-<up>") #'dirdiff-previous-difference))
   (should (eq (keymap-lookup dirdiff-mode-map "s") #'dirdiff-toggle-ignore-whitespace))
-  (should (eq (keymap-lookup dirdiff-mode-map "w") #'dirdiff-copy-filename-as-kill)))
+  (should (eq (keymap-lookup dirdiff-mode-map "w") #'dirdiff-copy-filename-as-kill))
+  (should (eq (keymap-lookup dirdiff-mode-map "D") #'dirdiff-delete))
+  (should (eq (keymap-lookup dirdiff-mode-map "C-x C-j") #'dirdiff-dired-jump)))
+
+(ert-deftest dirdiff-test-dired-jump ()
+  (dirdiff-test--with-dirs '(("d/f" . "1") ("l" . "l")) '(("d/f" . "2") ("d/e/r" . "r"))
+    (dirdiff-test--in-buffer (dirdiff-test--session left right)
+      (cl-flet ((jump (rel)
+                  (with-current-buffer buffer
+                    (dirdiff-test--goto rel)
+                    (save-window-excursion
+                      (dirdiff-dired-jump)
+                      (prog1 (list (file-name-as-directory default-directory)
+                                   (ignore-errors (dired-get-filename)))
+                        (kill-buffer))))))
+        (should (equal (jump "d/f") (list (file-name-as-directory (expand-file-name "d" left))
+                                         (expand-file-name "d/f" left))))
+        ;; Not on the active side: the nearest directory above it there.
+        (should (equal (car (jump "d/e/r")) (file-name-as-directory (expand-file-name "d" left))))
+        (with-current-buffer buffer (dirdiff--set-side 'right))
+        (should (equal (jump "d/e/r") (list (file-name-as-directory (expand-file-name "d/e" right))
+                                           (expand-file-name "d/e/r" right))))
+        ;; Not on the right side at all: the root.
+        (should (equal (car (jump "l")) (file-name-as-directory right)))))))
 
 (ert-deftest dirdiff-test-copy-filename ()
   (dirdiff-test--with-dirs '(("d/f" . "1")) '(("d/f" . "2") ("d/r" . "r"))
@@ -983,7 +1006,9 @@ With IGNORE-WHITESPACE, ignore whitespace."
           (dirdiff-test--goto "a.txt")
           (dirdiff--set-side 'right)
           (dirdiff-copy-filename-as-kill 0)
-          (should (equal (current-kill 0) (expand-file-name "a.txt" repo))))))))
+          (should (equal (current-kill 0) (expand-file-name "a.txt" repo))))
+        (dirdiff--set-side 'left)
+        (should-error (dirdiff-dired-jump) :type 'user-error)))))
 
 (defun dirdiff-test--local-file (session rel side)
   "Return the local file of the node of SESSION at REL on SIDE."

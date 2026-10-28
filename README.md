@@ -91,9 +91,10 @@ deleting act on it.
 | `B` | compare binary files byte by byte, or trust the same size and time |
 | `g`, `!` | compare again |
 | `>`, `<` (also `M-<right>`, `M-<left>`, or `a`, `b` as in ediff) | copy the entry to the right / left side (for directories, what differs; see below); if it is missing on the side copied from, delete it on the other side |
-| `d` | delete the entry on the active side (to the trash if `delete-by-moving-to-trash`) |
+| `D`, `d` | delete the entry on the active side, after confirmation (to the trash if `delete-by-moving-to-trash`) |
 | `v` | visit the file on the active side in this window |
 | `o` | visit the file on the active side in another window |
+| `C-x C-j` | Dired on the active side, with point on the entry, like `dired-jump` (`C-u` for another window) |
 | `w` | copy the entry's name, like Dired: `C-u w` relative to the compared directories, `C-0 w` the full name (`REV:PATH` for a git revision) |
 | `?` | menu with all commands |
 | `q` | quit |
