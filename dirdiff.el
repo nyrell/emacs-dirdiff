@@ -1372,10 +1372,11 @@ not (such as .git) are kept, and so is the directory then."
       (user-error "The contents of %s are not compared, so it cannot be deleted"
                   (dirdiff-node-rel node)))
     (dirdiff--check-readable node)
-    (when (yes-or-no-p (format "Delete %s%s on the %s side? "
-                               (dirdiff-node-rel node)
-                               (if (dirdiff--entry-dir-p entry) "/ and its contents" "")
-                               side))
+    (when (y-or-n-p (format "Delete on %s side: %s%s? "
+                            side
+                            (dirdiff-source-name (dirdiff--session-source dirdiff--session side)
+                                                 (dirdiff-node-rel node))
+                            (if (dirdiff--entry-dir-p entry) "/" "")))
       (let ((dirdiff--kept nil))
         (dirdiff--remove node side)
         (dirdiff--refresh-node dirdiff--session node)
@@ -1457,7 +1458,6 @@ Dired windows, restore them (see `dirdiff-replace-dired-windows')."
   "M-<left>" #'dirdiff-copy-to-left
   "a" #'dirdiff-copy-to-right
   "b" #'dirdiff-copy-to-left
-  "d" #'dirdiff-delete
   "D" #'dirdiff-delete
   "C-x C-j" #'dirdiff-dired-jump
   "q" #'dirdiff-quit
